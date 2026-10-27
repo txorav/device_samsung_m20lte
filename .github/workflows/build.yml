@@ -119,14 +119,14 @@ jobs:
           sudo systemctl stop systemd-oomd 2>/dev/null || true
           sudo systemctl disable systemd-oomd 2>/dev/null || true
 
-          # Configure 16G swap for heavy AOSP/Soong compilation
+          # Configure 32G swap for heavy AOSP/Soong compilation
           sudo swapoff -a 2>/dev/null || true
           sudo rm -f /swapfile 2>/dev/null || true
-          sudo fallocate -l 16G /swapfile
+          sudo fallocate -l 32G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
-          sudo sysctl vm.swappiness=100
+          sudo sysctl vm.swappiness=30
           swapon --show
           free -h
 
@@ -184,11 +184,28 @@ jobs:
           git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_system_tools_mkbootimg "$SRC_DIR/system/tools/mkbootimg"
           echo "LineageOS mkbootimg installed successfully."
 
-      - name: Trim disk before build
+      - name: Trim source tree & prune non-recovery projects for Soong
         run: |
-          du -sh "$SRC_DIR" 2>/dev/null || true
-          find "$SRC_DIR/prebuilts" -maxdepth 6 -type d -name .git -prune -exec rm -rf {} + 2>/dev/null || true
-          find "$SRC_DIR/.repo/project-objects" -type d -name '*.git' -prune -exec rm -rf {} + 2>/dev/null || true
+          cd "$SRC_DIR"
+          echo "Disk space before pruning:"
+          df -h /
+
+          # Delete heavy non-recovery projects that are not needed by recovery
+          rm -rf cts platform_testing developers development test tools/tradefederation tools/test pdk
+
+          # Use .find-ignore to stop Soong finder from parsing unused large trees
+          for d in packages/apps packages/providers packages/screensavers packages/wallpapers packages/services packages/inputmethods art/test frameworks/base/tests frameworks/base/packages kernel/tests device/amlogic device/google device/linaro device/generic/car device/generic/goldfish device/generic/goldfish-opengl device/generic/trusty device/generic/x86 device/generic/x86_64; do
+            if [ -d "$d" ]; then
+              touch "$d/.find-ignore"
+              echo "Added .find-ignore to $d"
+            fi
+          done
+
+          # Prune git packs in prebuilts to save space
+          find prebuilts -maxdepth 6 -type d -name .git -prune -exec rm -rf {} + 2>/dev/null || true
+          find .repo/project-objects -type d -name '*.git' -prune -exec rm -rf {} + 2>/dev/null || true
+
+          echo "Disk space after pruning:"
           df -h /
 
       - name: Compile AERA Recovery
@@ -206,7 +223,7 @@ jobs:
           AERA_BUILD_STATUS: Unofficial
           AERA_MAINTAINER: txorav
           OF_MAINTAINER: txorav
-          GOMEMLIMIT: '8192MiB'
+          AERA_CURRENT_DEV_STR: '2026-10-27 (aera-16.0)'
         run: |
           cd "$SRC_DIR"
           set -o pipefail
@@ -258,7 +275,7 @@ jobs:
           if [ $BUILD_RC -ne 0 ]; then
             echo "::error::mka failed with exit code $BUILD_RC"
             tail -n 60 build.log || true
-            exit $BUILD_RC
+            exit 1
           fi
 
       - name: Package Odin Tar & Checksums
