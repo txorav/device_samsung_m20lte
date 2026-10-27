@@ -218,14 +218,7 @@ jobs:
               echo "Patched BackupHelpers.cpp"
             fi
             if [ -f "frameworks/base/libs/androidfw/Android.bp" ]; then
-              python3 -c "
-p = 'frameworks/base/libs/androidfw/Android.bp'
-c = open(p).read()
-import re
-c = re.sub(r'cc_aconfig_library\s*\{[^}]*\}', '', c)
-c = c.replace('\"backup_flags_cc_lib\",', '')
-open(p, 'w').write(c)
-"
+              python3 -c 'import re; p="frameworks/base/libs/androidfw/Android.bp"; c=open(p).read(); c=re.sub(r"cc_aconfig_library\s*\{[^}]*\}", "", c).replace("\"backup_flags_cc_lib\",", ""); open(p,"w").write(c)'
               echo "Patched androidfw/Android.bp"
             fi
             echo "Pruned frameworks/base (kept only libs/androidfw)"
