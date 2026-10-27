@@ -232,6 +232,16 @@ jobs:
             fi
           done
 
+          # Prune external/avb/rust, external/avb/test, and any directories using avb_add_hash_footer
+          [ -d "external/avb/rust" ] && touch "external/avb/rust/.find-ignore"
+          [ -d "external/avb/test" ] && touch "external/avb/test/.find-ignore"
+          [ -d "packages/modules/Virtualization" ] && touch "packages/modules/Virtualization/.find-ignore"
+          for f in $(grep -rl "avb_add_hash_footer" external packages system 2>/dev/null); do
+            d=$(dirname "$f")
+            touch "$d/.find-ignore"
+            echo "Ignored $d due to avb_add_hash_footer"
+          done
+
           # Prune all remaining unit tests/fuzzers across the source tree (excluding build, recovery, lvgl, and device tree)
           find . -maxdepth 6 -type d \( -name "tests" -o -name "test" -o -name "testing" -o -name "fuzz" \) \
             -not -path "./build/*" \
