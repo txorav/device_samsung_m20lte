@@ -1,0 +1,384 @@
+name: AERA Recovery Build (m20lte)
+
+on:
+  workflow_dispatch:
+    inputs:
+      makefile:
+        description: 'Lunch target'
+        required: false
+        default: 'twrp_m20lte-eng'
+      build_target:
+        description: 'Make target'
+        required: false
+        default: 'recoveryimage'
+      fox_branch:
+        description: 'OrangeFox sync branch'
+        required: false
+        default: '12.1'
+      jobs:
+        description: 'Parallel make jobs'
+        required: false
+        default: '4'
+      ccache:
+        description: 'Use ccache (true/false)'
+        required: false
+        default: 'true'
+      publish_release:
+        description: 'Create a GitHub release with the image'
+        type: boolean
+        required: false
+        default: false
+  push:
+    branches:
+      - fox_12.1
+      - fox_11.0
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  FOX_SYNC_URL: 'https://gitlab.com/OrangeFox/sync.git'
+  FOX_SYNC_BRANCH: ${{ github.event.inputs.fox_branch || '12.1' }}
+  SRC_DIR: 'aosp'
+  FOX_BUILD_TYPE: 'Unofficial'
+  FOX_BUILD_DEVICE: 'm20lte'
+  OF_MAINTAINER: 'txorav'
+  CCACHE_DIR: '${{ github.workspace }}/.ccache'
+
+jobs:
+  build:
+    name: Build AERA Recovery for Samsung Galaxy M20 (m20lte)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout device repository
+        uses: actions/checkout@v4
+        with:
+          path: device_repo
+          fetch-depth: 1
+
+      - name: Show parameters & environment
+        run: |
+          echo "OrangeFox Sync : $FOX_SYNC_URL @ $FOX_SYNC_BRANCH"
+          echo "Lunch target   : ${{ inputs.makefile || 'twrp_m20lte-eng' }}"
+          echo "Build target   : ${{ inputs.build_target || 'recoveryimage' }}"
+          echo "Jobs           : ${{ inputs.jobs || '4' }}"
+          echo "Free disk space before:"
+          df -h /
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                    /opt/hostedtoolcache \
+                    /usr/local/share/boost /usr/share/swift /opt/microsoft \
+                    /usr/local/.ghcup /usr/local/share/powershell \
+                    /usr/local/aws-cli /usr/local/aws-sam-cli /usr/lib/mono \
+                    /usr/share/java /opt/google /usr/local/julia* \
+                    /usr/local/share/chromium /usr/local/share/vcpkg || true
+          sudo docker system prune -af --volumes 2>/dev/null || true
+          sudo rm -rf /var/lib/docker/* 2>/dev/null || true
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /swapfile 2>/dev/null || true
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison ccache curl flex git git-lfs gnupg patch \
+            gcc-multilib g++-multilib \
+            lib32readline-dev lib32z1-dev libelf-dev liblz4-tool \
+            libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
+            lz4 pngcrush python3 rsync schedtool squashfs-tools unzip \
+            xz-utils zip zlib1g-dev openjdk-11-jdk-headless jq lzma liblzma-dev
+          sudo ln -sf /usr/bin/python3 /usr/bin/python 2>/dev/null || true
+          java -version 2>&1
+
+      - name: Set JDK 11
+        run: |
+          if [ -d "$JAVA_HOME_11_X64" ]; then
+            J="$JAVA_HOME_11_X64"
+          elif [ -x /usr/lib/jvm/java-11-openjdk-amd64/bin/java ]; then
+            J=/usr/lib/jvm/java-11-openjdk-amd64
+          else
+            J=$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")
+          fi
+          echo "JAVA_HOME=$J" >> "$GITHUB_ENV"
+          "$J/bin/java" -version 2>&1
+
+      - name: Configure swap memory
+        run: |
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /swapfile 2>/dev/null || true
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          swapon --show
+          free -h
+
+      - name: Install repo launcher & configure git
+        run: |
+          mkdir -p ~/.bin
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/.bin/repo
+          chmod a+x ~/.bin/repo
+          echo "$HOME/.bin" >> "$GITHUB_PATH"
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Restore ccache
+        if: ${{ (inputs.ccache || 'true') == 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-aera-m20lte-${{ github.run_id }}
+          restore-keys: |
+            ccache-aera-m20lte-
+
+      - name: Configure ccache
+        if: ${{ (inputs.ccache || 'true') == 'true' }}
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache -M 8G
+          ccache --zero-stats || true
+
+      - name: Pre-download Magisk for OrangeFox
+        run: |
+          mkdir -p "$HOME/Magisk"
+          curl -fsSL -o "$HOME/Magisk/Magisk.zip" "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk" || true
+          ls -lh "$HOME/Magisk/Magisk.zip" || true
+
+      - name: Sync OrangeFox sources
+        run: |
+          set -e
+          mkdir -p "$GITHUB_WORKSPACE/fox-sync"
+          git clone --depth=1 "$FOX_SYNC_URL" "$GITHUB_WORKSPACE/fox-sync"
+          cd "$GITHUB_WORKSPACE/fox-sync"
+          chmod +x ./orangefox_sync.sh
+          ./orangefox_sync.sh --branch "$FOX_SYNC_BRANCH" --path "$GITHUB_WORKSPACE/$SRC_DIR"
+
+      - name: Install device tree
+        run: |
+          set -e
+          mkdir -p "$SRC_DIR/device/samsung/m20lte"
+          rsync -av --exclude=".git" --exclude=".github" device_repo/ "$SRC_DIR/device/samsung/m20lte/"
+          ls -la "$SRC_DIR/device/samsung/m20lte"
+
+      - name: Install LineageOS mkbootimg (for Samsung Exynos --dt support)
+        run: |
+          set -e
+          rm -rf "$SRC_DIR/system/tools/mkbootimg"
+          git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_system_tools_mkbootimg "$SRC_DIR/system/tools/mkbootimg"
+          echo "LineageOS mkbootimg installed successfully."
+
+      - name: Trim disk before build
+        run: |
+          du -sh "$SRC_DIR" 2>/dev/null || true
+          find "$SRC_DIR/prebuilts" -maxdepth 6 -type d -name .git -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$SRC_DIR/.repo/project-objects" -type d -name '*.git' -prune -exec rm -rf {} + 2>/dev/null || true
+          df -h /
+
+      - name: Compile OrangeFox
+        env:
+          USE_CCACHE: ${{ inputs.ccache || 'true' }}
+          ALLOW_MISSING_DEPENDENCIES: 'true'
+          BUILD_JOBS: ${{ inputs.jobs || '4' }}
+          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-eng' }}
+          BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
+          BUILD_USERNAME: ${{ github.actor }}
+          BUILD_HOSTNAME: ofox-builder
+          FOX_BUILD_DEVICE: m20lte
+          FOX_BUILD_TYPE: Unofficial
+          OF_MAINTAINER: txorav
+        run: |
+          cd "$SRC_DIR"
+          set -o pipefail
+          : > build.log
+          set +e
+          source build/envsetup.sh >> build.log 2>&1
+          ENVSETUP_RC=$?
+          set -e
+          echo "envsetup finished with exit code ${ENVSETUP_RC}"
+          tail -n 20 build.log || true
+          if [ -z "$ANDROID_BUILD_TOP" ]; then
+            echo "::error::envsetup did not initialise ANDROID_BUILD_TOP"
+            exit 1
+          fi
+
+          set +e
+          lunch "$MAKEFILE_NAME" >> build.log 2>&1
+          LUNCH_RC=$?
+          set -e
+          tail -n 30 build.log || true
+          if [ "$LUNCH_RC" -ne 0 ] || [ -z "$TARGET_PRODUCT" ]; then
+            echo "::error::lunch failed or did not export TARGET_PRODUCT"
+            exit 1
+          fi
+          export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE
+          mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
+
+      - name: Package Odin Tar & Checksums
+        if: success()
+        run: |
+          OUT_DIR="$SRC_DIR/out/target/product/m20lte"
+          if [ -f "$OUT_DIR/recovery.img" ]; then
+            echo "Packaging Odin tar archives..."
+            cd "$OUT_DIR"
+            tar -H ustar -c recovery.img > recovery.tar
+            cp -f recovery.tar recovery.tar.md5
+            md5sum -t recovery.tar.md5 >> recovery.tar.md5
+            md5sum recovery.img > recovery.img.md5
+            sha256sum recovery.img > recovery.img.sha256
+            cd "$GITHUB_WORKSPACE"
+          fi
+          find "$OUT_DIR" -maxdepth 1 -name "*.zip" | while read -r z; do
+            md5sum "$z" | awk '{print $1}' > "${z}.md5"
+          done
+          ls -lh "$OUT_DIR"
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s || true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aera-m20lte-build-log
+          path: ${{ env.SRC_DIR }}/build.log
+          if-no-files-found: ignore
+
+      - name: Upload recovery artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aera-m20lte-recovery
+          path: |
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.zip
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.md5
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.sha256
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.tar
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.img
+          if-no-files-found: warn
+
+      - name: Create GitHub Release
+        if: github.event.inputs.publish_release == 'true' || startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.zip
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.md5
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.sha256
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.tar
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.img
+          generate_release_notes: true
+
+      - name: Upload Artifacts to Gofile & Notify Telegram
+        if: always()
+        continue-on-error: true
+        env:
+          GOFILE_TOKEN: 'IoC222lPjhLcrkCYcgVLdo7OkQRDW201'
+          TELEGRAM_BOT_TOKEN: '8477945979:AAGTYiUAfnPjQFpkh576D7Xsqm0RDQJr_As'
+          TELEGRAM_CHAT_ID: '8198896729'
+          JOB_STATUS: ${{ job.status }}
+          RECOVERY_FLAVOR: 'AERA'
+        run: |
+          python3 - << 'EOF'
+          import os, glob, hashlib, json, subprocess, urllib.request
+
+          flavor = os.environ.get("RECOVERY_FLAVOR", "Recovery")
+          status = os.environ.get("JOB_STATUS", "failure")
+          gofile_token = os.environ.get("GOFILE_TOKEN", "")
+          tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "")
+          src_dir = os.environ.get("SRC_DIR", "aosp")
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          run_id = os.environ.get("GITHUB_RUN_ID", "")
+          sha = os.environ.get("GITHUB_SHA", "")[:7]
+          branch = os.environ.get("GITHUB_REF_NAME", "fox_12.1")
+
+          def send_tg(text):
+              if not tg_token or not tg_chat: return
+              data = json.dumps({
+                  "chat_id": tg_chat,
+                  "text": text,
+                  "parse_mode": "HTML",
+                  "disable_web_page_preview": True
+              }).encode("utf-8")
+              req = urllib.request.Request(f"https://api.telegram.org/bot{tg_token}/sendMessage", data=data, headers={"Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r: pass
+              except Exception as e: print("Telegram send error:", e)
+
+          if status != "success":
+              fail_msg = f"❌ <b>{flavor} Build Failed!</b>\n\n📱 <b>Device:</b> Samsung Galaxy M20 (<code>m20lte</code>)\n🌿 <b>Branch:</b> {branch}\n🔖 <b>Commit:</b> <a href=\"https://github.com/{repo}/commit/{sha}\">{sha}</a>\n⏱ <b>Logs:</b> <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">View Failed Run</a>"
+              send_tg(fail_msg)
+              exit(0)
+
+          target_dir = f"{src_dir}/out/target/product/m20lte"
+          files = sorted(glob.glob(f"{target_dir}/*.zip") + glob.glob(f"{target_dir}/*.tar") + glob.glob(f"{target_dir}/recovery.img"))
+          if not files:
+              send_tg(f"⚠️ <b>{flavor} Build Succeeded</b> but no recovery artifacts were found in {target_dir}.\n⏱ Run: <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">#{run_id}</a>")
+              exit(0)
+
+          try:
+              req = urllib.request.Request("https://api.gofile.io/servers", headers={"Authorization": f"Bearer {gofile_token}"})
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  sdata = json.loads(r.read().decode("utf-8"))
+                  servers = [s.get("name") for s in sdata.get("data", {}).get("servers", []) if s.get("name")]
+          except Exception:
+              servers = ["store-na-phx-1", "store6", "store3", "store1"]
+          if not servers:
+              servers = ["store-na-phx-1", "store6", "store3"]
+
+          links = []
+          for f in files:
+              fname = os.path.basename(f)
+              fsize = f"{os.path.getsize(f) / (1024*1024):.1f}MB"
+              h = hashlib.sha256(open(f, "rb").read()).hexdigest()[:16]
+              
+              dl = None
+              for srv in servers:
+                  print(f"Uploading {fname} ({fsize}) to Gofile server {srv}...")
+                  cmd = f'curl -sSL --http1.1 --connect-timeout 30 --max-time 600 -X POST "https://{srv}.gofile.io/contents/uploadfile" -H "Authorization: Bearer {gofile_token}" -F "file=@{f}"'
+                  try:
+                      res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, text=True, timeout=660)
+                      if res.stdout:
+                          j = json.loads(res.stdout)
+                          dl = j.get("data", {}).get("downloadPage")
+                          if dl:
+                              print(f"Uploaded {fname} -> {dl}")
+                              break
+                  except Exception as e:
+                      print(f"Gofile server {srv} failed: {e}")
+
+              lb_dl = None
+              try:
+                  print(f"Uploading {fname} to Litterbox mirror...")
+                  lb_cmd = f'curl -sSL --http1.1 --connect-timeout 30 --max-time 600 -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@{f}" https://litterbox.catbox.moe/resources/internals/api.php'
+                  lb_res = subprocess.run(lb_cmd, shell=True, stdout=subprocess.PIPE, text=True, timeout=660).stdout.strip()
+                  if lb_res.startswith("http"):
+                      lb_dl = lb_res
+                      print(f"Litterbox uploaded: {lb_dl}")
+              except Exception as e:
+                  print(f"Litterbox failed: {e}")
+
+              mirror_links = []
+              if dl:
+                  mirror_links.append(f'📂 <a href="{dl}">Gofile</a>')
+              if lb_dl:
+                  mirror_links.append(f'⚡ <a href="{lb_dl}">Litterbox (Direct)</a>')
+              
+              if mirror_links:
+                  links.append(f"📦 <b>{fname}</b> ({fsize})\n" + " | ".join(mirror_links) + f"\n🔑 <code>{h}...</code>")
+              else:
+                  links.append(f"⚠️ <b>{fname}</b> ({fsize}) - Upload error")
+
+          msg = f"🎉 <b>{flavor} Build Completed!</b>\n\n📱 <b>Device:</b> Samsung Galaxy M20 (<code>m20lte</code>)\n🌿 <b>Branch:</b> {branch}\n🔖 <b>Commit:</b> <a href=\"https://github.com/{repo}/commit/{sha}\">{sha}</a>\n⏱ <b>Run:</b> <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">View on GitHub Actions</a>\n\n" + "\n\n".join(links) + "\n\n🚀 <i>Ready to flash via Odin, Heimdall, fastboot, or recovery!</i>"
+          send_tg(msg)
+          print("Notification sent successfully!")
+          EOF

@@ -19,6 +19,9 @@
 $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/aosp_base.mk)
 
+# Inherit AERA recovery configuration when present
+$(call inherit-product-if-exists, device/samsung/m20lte/aera_m20lte.mk)
+
 # Inherit from our custom product configuration
 $(call inherit-product, vendor/twrp/config/common.mk)
 

@@ -57,10 +57,10 @@ if [ "$1" = "$FDEVICE" -o "$FOX_BUILD_DEVICE" = "$FDEVICE" ]; then
 	export OF_CLOCK_POS=1
 	export OF_ALLOW_DISABLE_NAVBAR=0
 	
-	# R11.1 Settings
+	# Settings
 	export FOX_VERSION="R11.1_1"
-	export OF_MAINTAINER="Sushrut1101"
-	export FOX_BUILD_TYPE="Stable"
+	export OF_MAINTAINER="${OF_MAINTAINER:-txorav}"
+	export FOX_BUILD_TYPE="${FOX_BUILD_TYPE:-Unofficial}"
 
 	# Quick Backup Defaults
 	export OF_QUICK_BACKUP_LIST="/boot;/data;/system_image;/vendor_image;"
