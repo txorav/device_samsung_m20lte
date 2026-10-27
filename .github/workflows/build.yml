@@ -6,15 +6,15 @@ on:
       makefile:
         description: 'Lunch target'
         required: false
-        default: 'twrp_m20lte-eng'
+        default: 'twrp_m20lte-bp2a-eng'
       build_target:
         description: 'Make target'
         required: false
-        default: 'recoveryimage'
-      fox_branch:
-        description: 'OrangeFox sync branch'
+        default: 'adbd recoveryimage'
+      aera_branch:
+        description: 'AERA manifest branch'
         required: false
-        default: '12.1'
+        default: 'aera-16.0'
       jobs:
         description: 'Parallel make jobs'
         required: false
@@ -40,11 +40,14 @@ permissions:
   contents: write
 
 env:
-  FOX_SYNC_URL: 'https://gitlab.com/OrangeFox/sync.git'
-  FOX_SYNC_BRANCH: ${{ github.event.inputs.fox_branch || '12.1' }}
+  AERA_MANIFEST_URL: 'https://github.com/AERA-Recovery/android_manifest.git'
+  AERA_MANIFEST_BRANCH: ${{ github.event.inputs.aera_branch || 'aera-16.0' }}
   SRC_DIR: 'aosp'
-  FOX_BUILD_TYPE: 'Unofficial'
-  FOX_BUILD_DEVICE: 'm20lte'
+  AERA_PRODUCT_PREFIX: 'AERA'
+  AERA_BUILD_DEVICE: 'm20lte'
+  AERA_BUILD_TYPE: 'Beta'
+  AERA_BUILD_STATUS: 'Unofficial'
+  AERA_MAINTAINER: 'txorav'
   OF_MAINTAINER: 'txorav'
   CCACHE_DIR: '${{ github.workspace }}/.ccache'
 
@@ -63,9 +66,9 @@ jobs:
 
       - name: Show parameters & environment
         run: |
-          echo "OrangeFox Sync : $FOX_SYNC_URL @ $FOX_SYNC_BRANCH"
-          echo "Lunch target   : ${{ inputs.makefile || 'twrp_m20lte-eng' }}"
-          echo "Build target   : ${{ inputs.build_target || 'recoveryimage' }}"
+          echo "AERA Manifest  : $AERA_MANIFEST_URL @ $AERA_MANIFEST_BRANCH"
+          echo "Lunch target   : ${{ inputs.makefile || 'twrp_m20lte-bp2a-eng' }}"
+          echo "Build target   : ${{ inputs.build_target || 'adbd recoveryimage' }}"
           echo "Jobs           : ${{ inputs.jobs || '4' }}"
           echo "Free disk space before:"
           df -h /
@@ -94,16 +97,16 @@ jobs:
             lib32readline-dev lib32z1-dev libelf-dev liblz4-tool \
             libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
             lz4 pngcrush python3 rsync schedtool squashfs-tools unzip \
-            xz-utils zip zlib1g-dev openjdk-11-jdk-headless jq lzma liblzma-dev
+            xz-utils zip zlib1g-dev openjdk-17-jdk-headless jq lzma liblzma-dev uuid-runtime
           sudo ln -sf /usr/bin/python3 /usr/bin/python 2>/dev/null || true
           java -version 2>&1
 
-      - name: Set JDK 11
+      - name: Set JDK 17
         run: |
-          if [ -d "$JAVA_HOME_11_X64" ]; then
-            J="$JAVA_HOME_11_X64"
-          elif [ -x /usr/lib/jvm/java-11-openjdk-amd64/bin/java ]; then
-            J=/usr/lib/jvm/java-11-openjdk-amd64
+          if [ -d "$JAVA_HOME_17_X64" ]; then
+            J="$JAVA_HOME_17_X64"
+          elif [ -x /usr/lib/jvm/java-17-openjdk-amd64/bin/java ]; then
+            J=/usr/lib/jvm/java-17-openjdk-amd64
           else
             J=$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")
           fi
@@ -146,20 +149,19 @@ jobs:
           ccache -M 8G
           ccache --zero-stats || true
 
-      - name: Pre-download Magisk for OrangeFox
+      - name: Pre-download Magisk
         run: |
           mkdir -p "$HOME/Magisk"
           curl -fsSL -o "$HOME/Magisk/Magisk.zip" "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk" || true
           ls -lh "$HOME/Magisk/Magisk.zip" || true
 
-      - name: Sync OrangeFox sources
+      - name: Sync AERA Recovery sources
         run: |
           set -e
-          mkdir -p "$GITHUB_WORKSPACE/fox-sync"
-          git clone --depth=1 "$FOX_SYNC_URL" "$GITHUB_WORKSPACE/fox-sync"
-          cd "$GITHUB_WORKSPACE/fox-sync"
-          chmod +x ./orangefox_sync.sh
-          ./orangefox_sync.sh --branch "$FOX_SYNC_BRANCH" --path "$GITHUB_WORKSPACE/$SRC_DIR"
+          mkdir -p "$GITHUB_WORKSPACE/$SRC_DIR"
+          cd "$GITHUB_WORKSPACE/$SRC_DIR"
+          repo init --depth=1 -u "$AERA_MANIFEST_URL" -b "$AERA_MANIFEST_BRANCH"
+          repo sync -c --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune -j4
 
       - name: Install device tree
         run: |
@@ -172,6 +174,7 @@ jobs:
         run: |
           set -e
           rm -rf "$SRC_DIR/system/tools/mkbootimg"
+          git clone --depth=1 -b lineage-22.2 https://github.com/LineageOS/android_system_tools_mkbootimg "$SRC_DIR/system/tools/mkbootimg" || \
           git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_system_tools_mkbootimg "$SRC_DIR/system/tools/mkbootimg"
           echo "LineageOS mkbootimg installed successfully."
 
@@ -182,22 +185,36 @@ jobs:
           find "$SRC_DIR/.repo/project-objects" -type d -name '*.git' -prune -exec rm -rf {} + 2>/dev/null || true
           df -h /
 
-      - name: Compile OrangeFox
+      - name: Compile AERA Recovery
         env:
           USE_CCACHE: ${{ inputs.ccache || 'true' }}
           ALLOW_MISSING_DEPENDENCIES: 'true'
           BUILD_JOBS: ${{ inputs.jobs || '4' }}
-          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-eng' }}
-          BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
+          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-bp2a-eng' }}
+          BUILD_TARGET: ${{ inputs.build_target || 'adbd recoveryimage' }}
           BUILD_USERNAME: ${{ github.actor }}
-          BUILD_HOSTNAME: ofox-builder
-          FOX_BUILD_DEVICE: m20lte
-          FOX_BUILD_TYPE: Unofficial
+          BUILD_HOSTNAME: aera-builder
+          AERA_PRODUCT_PREFIX: AERA
+          AERA_BUILD_DEVICE: m20lte
+          AERA_BUILD_TYPE: Beta
+          AERA_BUILD_STATUS: Unofficial
+          AERA_MAINTAINER: txorav
           OF_MAINTAINER: txorav
         run: |
           cd "$SRC_DIR"
           set -o pipefail
           : > build.log
+
+          LUNCH_TARGET="$MAKEFILE_NAME"
+          if [[ "$LUNCH_TARGET" == *"-eng" && "$LUNCH_TARGET" != *"-"*"-eng" ]]; then
+            PROD=$(echo "$LUNCH_TARGET" | cut -d'-' -f1)
+            LUNCH_TARGET="${PROD}-bp2a-eng"
+          elif [[ "$LUNCH_TARGET" == *"-userdebug" && "$LUNCH_TARGET" != *"-"*"-userdebug" ]]; then
+            PROD=$(echo "$LUNCH_TARGET" | cut -d'-' -f1)
+            LUNCH_TARGET="${PROD}-bp2a-userdebug"
+          fi
+          echo "Resolved lunch target: $LUNCH_TARGET"
+
           set +e
           source build/envsetup.sh >> build.log 2>&1
           ENVSETUP_RC=$?
@@ -210,7 +227,7 @@ jobs:
           fi
 
           set +e
-          lunch "$MAKEFILE_NAME" >> build.log 2>&1
+          lunch "$LUNCH_TARGET" >> build.log 2>&1
           LUNCH_RC=$?
           set -e
           tail -n 30 build.log || true
@@ -225,20 +242,36 @@ jobs:
         if: success()
         run: |
           OUT_DIR="$SRC_DIR/out/target/product/m20lte"
-          if [ -f "$OUT_DIR/recovery.img" ]; then
-            echo "Packaging Odin tar archives..."
+          if [ -d "$OUT_DIR" ]; then
             cd "$OUT_DIR"
-            tar -H ustar -c recovery.img > recovery.tar
-            cp -f recovery.tar recovery.tar.md5
-            md5sum -t recovery.tar.md5 >> recovery.tar.md5
-            md5sum recovery.img > recovery.img.md5
-            sha256sum recovery.img > recovery.img.sha256
+            if [ -f "recovery.img" ]; then
+              echo "Packaging Odin tar archives for recovery.img..."
+              tar -H ustar -c recovery.img > recovery.tar
+              cp -f recovery.tar recovery.tar.md5
+              md5sum -t recovery.tar.md5 >> recovery.tar.md5
+              md5sum recovery.img > recovery.img.md5
+              sha256sum recovery.img > recovery.img.sha256
+            fi
+            for img in AERA-*.img; do
+              if [ -f "$img" ]; then
+                base="${img%.img}"
+                echo "Packaging Odin tar archive for $img..."
+                tar -H ustar -c "$img" > "${base}.tar"
+                cp -f "${base}.tar" "${base}.tar.md5"
+                md5sum -t "${base}.tar.md5" >> "${base}.tar.md5"
+                md5sum "$img" > "${img}.md5"
+                sha256sum "$img" > "${img}.sha256"
+              fi
+            done
+            for zip in AERA-*.zip; do
+              if [ -f "$zip" ]; then
+                md5sum "$zip" | awk '{print $1}' > "${zip}.md5"
+                sha256sum "$zip" | awk '{print $1}' > "${zip}.sha256"
+              fi
+            done
             cd "$GITHUB_WORKSPACE"
+            ls -lh "$OUT_DIR"
           fi
-          find "$OUT_DIR" -maxdepth 1 -name "*.zip" | while read -r z; do
-            md5sum "$z" | awk '{print $1}' > "${z}.md5"
-          done
-          ls -lh "$OUT_DIR"
 
       - name: Show ccache stats
         if: always()
@@ -258,11 +291,8 @@ jobs:
         with:
           name: aera-m20lte-recovery
           path: |
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.zip
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.md5
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.sha256
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.tar
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.img
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/AERA-*
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.*
           if-no-files-found: warn
 
       - name: Create GitHub Release
@@ -270,11 +300,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.zip
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.md5
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.sha256
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.tar
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.img
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/AERA-*
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.*
           generate_release_notes: true
 
       - name: Upload Artifacts to Gofile & Notify Telegram
@@ -290,7 +317,7 @@ jobs:
           python3 - << 'EOF'
           import os, glob, hashlib, json, subprocess, urllib.request
 
-          flavor = os.environ.get("RECOVERY_FLAVOR", "Recovery")
+          flavor = os.environ.get("RECOVERY_FLAVOR", "AERA")
           status = os.environ.get("JOB_STATUS", "failure")
           gofile_token = os.environ.get("GOFILE_TOKEN", "")
           tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -320,7 +347,16 @@ jobs:
               exit(0)
 
           target_dir = f"{src_dir}/out/target/product/m20lte"
-          files = sorted(glob.glob(f"{target_dir}/*.zip") + glob.glob(f"{target_dir}/*.tar") + glob.glob(f"{target_dir}/recovery.img"))
+          files = sorted(glob.glob(f"{target_dir}/AERA-*.zip") + glob.glob(f"{target_dir}/AERA-*.tar") + glob.glob(f"{target_dir}/*.zip") + glob.glob(f"{target_dir}/*.tar") + glob.glob(f"{target_dir}/recovery.img"))
+          # Deduplicate while preserving order
+          seen = set()
+          unique_files = []
+          for f in files:
+              if f not in seen and not f.endswith(".md5") and not f.endswith(".sha256"):
+                  seen.add(f)
+                  unique_files.append(f)
+          files = unique_files
+
           if not files:
               send_tg(f"⚠️ <b>{flavor} Build Succeeded</b> but no recovery artifacts were found in {target_dir}.\n⏱ Run: <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">#{run_id}</a>")
               exit(0)

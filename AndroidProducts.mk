@@ -1,6 +1,7 @@
 #
 # Copyright 2017 The Android Open Source Project
 # Copyright (C) 2021 The OrangeFox Recovery Project
+# Copyright (C) 2024-2026 The AERA Recovery Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,5 +20,7 @@ PRODUCT_MAKEFILES := \
     $(LOCAL_DIR)/twrp_m20lte.mk
 
 COMMON_LUNCH_CHOICES := \
+    twrp_m20lte-bp2a-eng \
+    twrp_m20lte-bp2a-userdebug \
     twrp_m20lte-eng \
     twrp_m20lte-userdebug
