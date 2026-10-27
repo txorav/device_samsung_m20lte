@@ -113,14 +113,20 @@ jobs:
           echo "JAVA_HOME=$J" >> "$GITHUB_ENV"
           "$J/bin/java" -version 2>&1
 
-      - name: Configure swap memory
+      - name: Configure swap memory & system settings
         run: |
+          # Disable systemd-oomd to prevent premature SIGTERM (exit 143) on memory pressure
+          sudo systemctl stop systemd-oomd 2>/dev/null || true
+          sudo systemctl disable systemd-oomd 2>/dev/null || true
+
+          # Configure 16G swap for heavy AOSP/Soong compilation
           sudo swapoff -a 2>/dev/null || true
           sudo rm -f /swapfile 2>/dev/null || true
-          sudo fallocate -l 8G /swapfile
+          sudo fallocate -l 16G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
+          sudo sysctl vm.swappiness=100
           swapon --show
           free -h
 
@@ -200,6 +206,7 @@ jobs:
           AERA_BUILD_STATUS: Unofficial
           AERA_MAINTAINER: txorav
           OF_MAINTAINER: txorav
+          GOMEMLIMIT: '8192MiB'
         run: |
           cd "$SRC_DIR"
           set -o pipefail
@@ -236,7 +243,23 @@ jobs:
             exit 1
           fi
           export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE
+
+          # Start background heartbeat to prevent GitHub Actions 20-min silence timeout
+          ( while true; do sleep 60; echo "[HEARTBEAT $(date +'%H:%M:%S')] Mem: $(free -h | awk '/Mem:/ {print $3 "/" $2}') | Swap: $(free -h | awk '/Swap:/ {print $3 "/" $2}') | Disk: $(df -h / | awk 'NR==2 {print $4}') free"; done ) &
+          HEARTBEAT_PID=$!
+          trap 'kill $HEARTBEAT_PID 2>/dev/null || true' EXIT
+
           mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
+          BUILD_RC=${PIPESTATUS[0]}
+
+          kill $HEARTBEAT_PID 2>/dev/null || true
+          trap - EXIT
+
+          if [ $BUILD_RC -ne 0 ]; then
+            echo "::error::mka failed with exit code $BUILD_RC"
+            tail -n 60 build.log || true
+            exit $BUILD_RC
+          fi
 
       - name: Package Odin Tar & Checksums
         if: success()
@@ -282,7 +305,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aera-m20lte-build-log
-          path: ${{ env.SRC_DIR }}/build.log
+          path: |
+            ${{ env.SRC_DIR }}/build.log
+            ${{ env.SRC_DIR }}/out/soong.log
+            ${{ env.SRC_DIR }}/out/error.log
           if-no-files-found: ignore
 
       - name: Upload recovery artifacts
