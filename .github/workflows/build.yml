@@ -193,13 +193,40 @@ jobs:
           # Delete heavy non-recovery projects that are not needed by recovery
           rm -rf cts platform_testing developers development test tools/tradefederation tools/test pdk
 
-          # Use .find-ignore to stop Soong finder from parsing unused large trees
-          for d in packages/apps packages/providers packages/screensavers packages/wallpapers packages/services packages/inputmethods art/test frameworks/base/tests frameworks/base/packages kernel/tests device/amlogic device/google device/linaro device/generic/car device/generic/goldfish device/generic/goldfish-opengl device/generic/trusty device/generic/x86 device/generic/x86_64; do
+          # In frameworks/base, ignore all subdirectories except libs
+          if [ -d "frameworks/base" ]; then
+            for d in frameworks/base/*; do
+              if [ -d "$d" ] && [ "$(basename "$d")" != "libs" ]; then
+                touch "$d/.find-ignore"
+              fi
+            done
+            if [ -d "frameworks/base/libs" ]; then
+              for d in frameworks/base/libs/*; do
+                if [ -d "$d" ] && [ "$(basename "$d")" != "androidfw" ]; then
+                  touch "$d/.find-ignore"
+                fi
+              done
+            fi
+            [ -d "frameworks/base/libs/androidfw/tests" ] && touch "frameworks/base/libs/androidfw/tests/.find-ignore"
+            [ -d "frameworks/base/libs/androidfw/fuzz" ] && touch "frameworks/base/libs/androidfw/fuzz/.find-ignore"
+            echo "Pruned frameworks/base (kept only libs/androidfw)"
+          fi
+
+          # Prune other non-recovery frameworks and packages
+          for d in frameworks/opt frameworks/ex frameworks/layoutlib frameworks/multidex frameworks/libs packages/apps packages/providers packages/screensavers packages/wallpapers packages/services packages/inputmethods art/test kernel/tests device/amlogic device/google device/linaro device/generic/car device/generic/goldfish device/generic/goldfish-opengl device/generic/trusty device/generic/x86 device/generic/x86_64; do
             if [ -d "$d" ]; then
               touch "$d/.find-ignore"
               echo "Added .find-ignore to $d"
             fi
           done
+
+          # Prune all remaining unit tests/fuzzers across the source tree (excluding build, recovery, lvgl, and device tree)
+          find . -maxdepth 6 -type d \( -name "tests" -o -name "test" -o -name "testing" -o -name "fuzz" \) \
+            -not -path "./build/*" \
+            -not -path "./bootable/recovery/*" \
+            -not -path "./external/lvgl/*" \
+            -not -path "./device/samsung/m20lte/*" \
+            -exec touch {}/.find-ignore \; 2>/dev/null || true
 
           # Prune git packs in prebuilts to save space
           find prebuilts -maxdepth 6 -type d -name .git -prune -exec rm -rf {} + 2>/dev/null || true
