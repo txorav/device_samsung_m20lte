@@ -193,8 +193,9 @@ jobs:
           # Delete heavy non-recovery projects that are not needed by recovery
           rm -rf cts platform_testing developers development test tools/tradefederation tools/test pdk
 
-          # In frameworks/base, ignore all subdirectories except libs
+          # In frameworks/base, delete root .bp files (which declare framework.jar & Java aconfig host flags) and ignore all subdirectories except libs
           if [ -d "frameworks/base" ]; then
+            rm -f frameworks/base/*.bp
             for d in frameworks/base/*; do
               if [ -d "$d" ] && [ "$(basename "$d")" != "libs" ]; then
                 touch "$d/.find-ignore"
