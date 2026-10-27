@@ -210,6 +210,24 @@ jobs:
             fi
             [ -d "frameworks/base/libs/androidfw/tests" ] && touch "frameworks/base/libs/androidfw/tests/.find-ignore"
             [ -d "frameworks/base/libs/androidfw/fuzz" ] && touch "frameworks/base/libs/androidfw/fuzz/.find-ignore"
+            
+            # Patch androidfw to eliminate unused backup_flags aconfig dependency
+            if [ -f "frameworks/base/libs/androidfw/BackupHelpers.cpp" ]; then
+              sed -i 's|#include <com_android_server_backup.h>||g' frameworks/base/libs/androidfw/BackupHelpers.cpp
+              sed -i 's|namespace backup_flags = com::android::server::backup;|namespace backup_flags { inline bool enable_max_size_writes_to_pipes() { return true; } }|g' frameworks/base/libs/androidfw/BackupHelpers.cpp
+              echo "Patched BackupHelpers.cpp"
+            fi
+            if [ -f "frameworks/base/libs/androidfw/Android.bp" ]; then
+              python3 -c "
+p = 'frameworks/base/libs/androidfw/Android.bp'
+c = open(p).read()
+import re
+c = re.sub(r'cc_aconfig_library\s*\{[^}]*\}', '', c)
+c = c.replace('\"backup_flags_cc_lib\",', '')
+open(p, 'w').write(c)
+"
+              echo "Patched androidfw/Android.bp"
+            fi
             echo "Pruned frameworks/base (kept only libs/androidfw)"
           fi
 
