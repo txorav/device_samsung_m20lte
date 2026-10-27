@@ -35,6 +35,8 @@ OF_ENABLE_THEME_ENGINE := 1
 # Samsung specific flags
 OF_NO_SAMSUNG_SPECIAL := 0
 BOARD_HAS_DOWNLOAD_MODE := true
+FOX_VANILLA_BUILD := 1
+OF_USE_LZMA_COMPRESSION := 1
 
 # Backup defaults
 OF_QUICK_BACKUP_LIST := /boot;/data;/system_image;/vendor_image;

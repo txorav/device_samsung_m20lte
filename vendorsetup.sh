@@ -46,8 +46,8 @@ if [ "$1" = "$FDEVICE" -o "$FOX_BUILD_DEVICE" = "$FDEVICE" ]; then
 	export OF_FL_PATH1="/system/flashlight"
 	export OF_DEVICE_WITHOUT_PERSIST=1
 	export OF_SKIP_FBE_DECRYPTION=1
-	export OF_VANILLA_BUILD="1"
-	export FOX_USE_LZMA_COMPRESSION="1"
+	export FOX_VANILLA_BUILD="1"
+	export OF_USE_LZMA_COMPRESSION="1"
 	
 	# Screen Settings
 	export OF_SCREEN_H=2340
@@ -73,7 +73,7 @@ if [ "$1" = "$FDEVICE" -o "$FOX_BUILD_DEVICE" = "$FDEVICE" ]; then
 	export OF_USE_MAGISKBOOT_FOR_ALL_PATCHES="1"
 	export OF_DONT_PATCH_ENCRYPTED_DEVICE="1"
 	export OF_NO_TREBLE_COMPATIBILITY_CHECK="1"
-	export FOX_ADVANCED_SECURITY="1"
+	export OF_ADVANCED_SECURITY="1"
 	
 	export FOX_USE_BASH_SHELL="1"
 	export FOX_ASH_IS_BASH="1"
