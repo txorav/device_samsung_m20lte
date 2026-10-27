@@ -1,6 +1,7 @@
 #
 # Copyright (C) 2017 The Android Open Source Project
 # Copyright (C) 2018-2021 The OrangeFox Recovery Project
+# Copyright (C) 2024-2026 The AERA Recovery Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,10 +33,10 @@ TARGET_2ND_CPU_ABI2 := armeabi
 TARGET_2ND_CPU_VARIANT := generic
 TARGET_2ND_CPU_VARIANT_RUNTIME := cortex-a53
 
-TARGET_USES_64_BIT_BINDER := true
 TARGET_SUPPORTS_64_BIT_APPS := true
 
 # Build
+ALLOW_MISSING_DEPENDENCIES := true
 BUILD_BROKEN_DUP_RULES := true
 BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true
 BUILD_BROKEN_MISSING_REQUIRED_MODULES := true
@@ -79,12 +80,12 @@ BOARD_USES_METADATA_PARTITION := true
 # Treble
 TARGET_COPY_OUT_VENDOR := vendor
 
-# System as root
-BOARD_BUILD_SYSTEM_ROOT_IMAGE := true
+# Suppress secure erase
 BOARD_SUPPRESS_SECURE_ERASE := true
 
 # Recovery
 BOARD_HAS_DOWNLOAD_MODE := true
+AERA_HAS_DOWNLOAD_MODE := 1
 LZMA_RAMDISK_TARGETS := recovery
 TARGET_RECOVERY_PIXEL_FORMAT := "ABGR_8888"
 RECOVERY_SDCARD_ON_DATA := true
@@ -98,21 +99,36 @@ PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
 # Crypto
 TW_INCLUDE_CRYPTO := true
 TW_INCLUDE_CRYPTO_FBE := true
+AERA_INCLUDE_CRYPTO := true
+AERA_INCLUDE_CRYPTO_FBE := true
 
-# TWRP specific build flags
+# TWRP & AERA build flags
 TW_THEME := portrait_hdpi
+AERA_THEME := portrait_hdpi
 TW_BRIGHTNESS_PATH := "/sys/class/backlight/panel/brightness"
+AERA_BRIGHTNESS_PATH := "/sys/class/backlight/panel/brightness"
 TW_EXCLUDE_DEFAULT_USB_INIT := true
+AERA_EXCLUDE_DEFAULT_USB_INIT := true
 TW_EXTRA_LANGUAGES := true
+AERA_EXTRA_LANGUAGES := true
 TW_DEFAULT_LANGUAGE := en
+AERA_DEFAULT_LANGUAGE := en
 TW_INCLUDE_NTFS_3G := true
+AERA_INCLUDE_NTFS_3G := true
 TW_INPUT_BLACKLIST := "hbtp_vm"
+AERA_INPUT_BLACKLIST := "hbtp_vm"
 TW_MAX_BRIGHTNESS := 255
+AERA_MAX_BRIGHTNESS := 255
 TW_DEFAULT_BRIGHTNESS := 162
+AERA_DEFAULT_BRIGHTNESS := 162
 TW_SCREEN_BLANK_ON_BOOT := true
+AERA_SCREEN_BLANK_ON_BOOT := true
 TW_INCLUDE_FUSE_EXFAT := true
+AERA_INCLUDE_FUSE_EXFAT := true
 TW_INCLUDE_FUSE_NTFS := true
+AERA_INCLUDE_FUSE_NTFS := true
 
 # Debug
 TWRP_INCLUDE_LOGCAT := true
+AERA_INCLUDE_LOGCAT := true
 TARGET_USES_LOGD := true
