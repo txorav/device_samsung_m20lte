@@ -48,7 +48,8 @@ if [ "$1" = "$FDEVICE" -o "$AERA_BUILD_DEVICE" = "$FDEVICE" -o "$FOX_BUILD_DEVIC
 	export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER="1"
 
 	# OrangeFox & AERA Build Identity
-	export FOX_VERSION="R12.1"
+	unset FOX_VERSION
+	export FOX_MAINTAINER_PATCH_VERSION="1"
 	export OF_MAINTAINER="txorav"
 	export FOX_BUILD_TYPE="Unofficial"
 	export FOX_BUILD_DEVICE="m20lte"
@@ -164,7 +165,12 @@ if [ "$1" = "$FDEVICE" -o "$AERA_BUILD_DEVICE" = "$FDEVICE" -o "$FOX_BUILD_DEVIC
 	download_magisk $FOX_USE_SPECIFIC_MAGISK_ZIP
 
 	# Log Build VARs
-	if [ -n "$AERA_BUILD_LOG_FILE" -a -f "$AERA_BUILD_LOG_FILE" ]; then
+	if [ -n "$FOX_BUILD_LOG_FILE" -a -f "$FOX_BUILD_LOG_FILE" ]; then
+		export | grep "FOX" >> $FOX_BUILD_LOG_FILE
+		export | grep "OF_" >> $FOX_BUILD_LOG_FILE
+		export | grep "TARGET_" >> $FOX_BUILD_LOG_FILE
+		export | grep "TW_" >> $FOX_BUILD_LOG_FILE
+	elif [ -n "$AERA_BUILD_LOG_FILE" -a -f "$AERA_BUILD_LOG_FILE" ]; then
 		export | grep "AERA" >> $AERA_BUILD_LOG_FILE
 		export | grep "FOX" >> $AERA_BUILD_LOG_FILE
 		export | grep "OF_" >> $AERA_BUILD_LOG_FILE

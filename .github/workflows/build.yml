@@ -196,6 +196,8 @@ jobs:
           OF_MAINTAINER: txorav
         run: |
           cd "$SRC_DIR"
+          unset FOX_VERSION
+          export FOX_MAINTAINER_PATCH_VERSION="1"
           set -o pipefail
           : > build.log
           set +e
