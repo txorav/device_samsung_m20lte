@@ -15,7 +15,6 @@ on fs
     symlink /dev/block/bootdevice/by-name/CPEFS /dev/block/bootdevice/by-name/cpefs
     symlink /dev/block/bootdevice/by-name/UP_PARAM /dev/block/bootdevice/by-name/up_param
     symlink /dev/block/bootdevice/by-name/DTBO /dev/block/bootdevice/by-name/dtbo
-    symlink /dev/block/bootdevice/by-name/VBMETA /dev/block/bootdevice/by-name/vbmeta
     symlink /dev/block/bootdevice/by-name/PRODUCT /dev/block/bootdevice/by-name/product
 
 on boot

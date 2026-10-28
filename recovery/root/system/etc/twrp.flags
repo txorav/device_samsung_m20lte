@@ -10,7 +10,7 @@
 
 /storage		f2fs		/data/media/0							flags=display="Internal Storage";usermrf;backup=1;fsflags="bind";removable
 
-/system_root		ext4		/dev/block/platform/13500000.dwmmc0/by-name/SYSTEM		flags=display="System";backup=1;wipeingui
+/system			ext4		/dev/block/platform/13500000.dwmmc0/by-name/SYSTEM		flags=display="System";backup=1;wipeingui
 /system_image		emmc		/dev/block/platform/13500000.dwmmc0/by-name/SYSTEM		flags=display="System Image";backup=1;flashimg=1
 /vendor			ext4		/dev/block/platform/13500000.dwmmc0/by-name/VENDOR		flags=display="Vendor";backup=1;wipeingui
 /vendor_image		emmc		/dev/block/platform/13500000.dwmmc0/by-name/VENDOR		flags=display="Vendor Image";backup=1;flashimg=1
@@ -20,7 +20,6 @@
 /cpefs			ext4		/dev/block/platform/13500000.dwmmc0/by-name/CPEFS		flags=display="CPEFS (Modem NV)";backup=1;subpartitionof=/efs
 /up_param		emmc		/dev/block/platform/13500000.dwmmc0/by-name/UP_PARAM		flags=display="Param / Boot Logo";backup=1;flashimg=1
 /dtbo			emmc		/dev/block/platform/13500000.dwmmc0/by-name/DTBO		flags=display="DTBO";backup=1;flashimg=1
-/vbmeta			emmc		/dev/block/platform/13500000.dwmmc0/by-name/VBMETA		flags=display="VBMETA";backup=1;flashimg=1
 /product		ext4		/dev/block/platform/13500000.dwmmc0/by-name/PRODUCT		flags=display="Product";backup=1;wipeingui
 /product_image		emmc		/dev/block/platform/13500000.dwmmc0/by-name/PRODUCT		flags=display="Product Image";backup=1;flashimg=1
 

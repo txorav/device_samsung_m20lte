@@ -1,9 +1,28 @@
-# Android fstab file.
-# The filesystem that contains the filesystem checker binary (typically /system) cannot
-# specify MF_CHECK, and must come before any filesystems that do specify MF_CHECK
+#
+# OrangeFox Recovery Project - Samsung Galaxy M20 (m20lte)
+# Complete physical partition mapping matching Exynos 7904 PIT
+#
 
-# <src>								<mnt_point>	<type>		<mnt_flags and options>												<fs_mgr_flags>
+/boot		    emmc	/dev/block/platform/13500000.dwmmc0/by-name/BOOT	    flags=display="Boot";backup=1;flashimg=1
+/recovery	    emmc	/dev/block/platform/13500000.dwmmc0/by-name/RECOVERY    flags=display="Recovery";backup=1;flashimg=1
+/cache		    ext4	/dev/block/platform/13500000.dwmmc0/by-name/CACHE       flags=display="Cache"
+/data		    f2fs	/dev/block/platform/13500000.dwmmc0/by-name/USERDATA    flags=display="Data";encryptable=footer;length=-20480;fileencryption=ice
 
-/dev/block/platform/13500000.dwmmc0/by-name/OMR			/metadata	ext4		noatime,nosuid,nodev,noauto_da_alloc,discard,journal_checksum,data=ordered,errors=panic				wait,first_stage_mount,formattable,check
-/dev/block/platform/13500000.dwmmc0/by-name/USERDATA		/data		f2fs		noatime,nosuid,nodev,discard,usrquota,grpquota,fsync_mode=nobarrier,reserve_root=32768,resgid=5678		wait,check,latemount,fileencryption=aes-256-xts,reservedsize=128M,quota
-/dev/block/platform/13500000.dwmmc0/by-name/MISC		/misc		emmc		defaults													defaults
+# Internal storage
+/storage        ext4   	/data/media/0                  		     		        flags=display="Internal Storage";usermrf;backup=1;fsflags="bind";removable
+
+/system         ext4	/dev/block/platform/13500000.dwmmc0/by-name/SYSTEM      flags=display="System";backup=1
+/system_image   emmc    /dev/block/platform/13500000.dwmmc0/by-name/SYSTEM		flags=display="System Image";backup=1;flashimg=1
+/vendor		    ext4	/dev/block/platform/13500000.dwmmc0/by-name/VENDOR      flags=display="Vendor";backup=1;wipeingui
+/vendor_image   emmc    /dev/block/platform/13500000.dwmmc0/by-name/VENDOR  	flags=display="Vendor Image";backup=1;flashimg=1
+
+/modem		    emmc	/dev/block/platform/13500000.dwmmc0/by-name/RADIO       flags=display="Modem";backup=1
+/efs		    ext4	/dev/block/platform/13500000.dwmmc0/by-name/EFS	        flags=display="EFS";backup=1
+/cpefs		    ext4	/dev/block/platform/13500000.dwmmc0/by-name/CPEFS		flags=display="CPEFS";backup=1;subpartitionof=/efs
+/up_param		emmc	/dev/block/platform/13500000.dwmmc0/by-name/UP_PARAM	flags=display="Param";backup=1;flashimg=1
+/dtbo			emmc	/dev/block/platform/13500000.dwmmc0/by-name/DTBO		flags=display="DTBO";backup=1;flashimg=1
+/misc           emmc    /dev/block/platform/13500000.dwmmc0/by-name/MISC        flags=display="Misc";backup=1
+
+# Removable storage
+/sdcard1        vfat    /dev/block/mmcblk1p1  /dev/block/mmc1k1p1               flags=display="MicroSD Card";storage;wipeingui;removable
+/usb_otg        vfat    /dev/block/sda1       /dev/block/sda                    flags=display="USB-Storage";storage;wipeingui;removable
