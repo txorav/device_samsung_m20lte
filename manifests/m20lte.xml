@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="github" fetch="https://github.com" />
+
+  <!-- Samsung Galaxy M20 (m20lte) Trees -->
+  <project name="txorav/device_samsung_m20lte" path="device/samsung/m20lte" remote="github" revision="fox_12.1" />
+  <project name="txorav/kernel_samsung_m20lte" path="kernel/samsung/m20lte" remote="github" revision="lineage-17.1" />
+  <project name="LineageOS/android_system_tools_mkbootimg" path="system/tools/mkbootimg" remote="github" revision="lineage-19.1" />
+</manifest>

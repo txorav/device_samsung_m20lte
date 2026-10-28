@@ -31,6 +31,10 @@ local chkdev=$(echo "$BASH_SOURCE" | grep -w $FDEVICE)
    fi
 }
 
+fox_get_target_device() {
+   aera_get_target_device
+}
+
 if [ -z "$1" -a -z "$AERA_BUILD_DEVICE" -a -z "$FOX_BUILD_DEVICE" ]; then
    aera_get_target_device
 fi
@@ -43,7 +47,11 @@ if [ "$1" = "$FDEVICE" -o "$AERA_BUILD_DEVICE" = "$FDEVICE" -o "$FOX_BUILD_DEVIC
 	export AERA_USE_TWRP_RECOVERY_IMAGE_BUILDER="1"
 	export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER="1"
 
-	# AERA Build Identity
+	# OrangeFox & AERA Build Identity
+	export FOX_VERSION="R12.1"
+	export OF_MAINTAINER="txorav"
+	export FOX_BUILD_TYPE="Unofficial"
+	export FOX_BUILD_DEVICE="m20lte"
 	export AERA_PRODUCT_PREFIX=AERA
 	export AERA_BUILD_STATUS=Unofficial
 	export AERA_BUILD_TYPE=Beta

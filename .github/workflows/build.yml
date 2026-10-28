@@ -1,4 +1,4 @@
-name: AERA Recovery Build (m20lte)
+name: OrangeFox Recovery Build (m20lte)
 
 on:
   workflow_dispatch:
@@ -6,15 +6,15 @@ on:
       makefile:
         description: 'Lunch target'
         required: false
-        default: 'twrp_m20lte-bp2a-eng'
+        default: 'twrp_m20lte-eng'
       build_target:
         description: 'Make target'
         required: false
-        default: 'adbd recoveryimage'
-      aera_branch:
-        description: 'AERA manifest branch'
+        default: 'recoveryimage'
+      fox_branch:
+        description: 'OrangeFox sync branch'
         required: false
-        default: 'aera-16.0'
+        default: '12.1'
       jobs:
         description: 'Parallel make jobs'
         required: false
@@ -40,20 +40,17 @@ permissions:
   contents: write
 
 env:
-  AERA_MANIFEST_URL: 'https://github.com/AERA-Recovery/android_manifest.git'
-  AERA_MANIFEST_BRANCH: ${{ github.event.inputs.aera_branch || 'aera-16.0' }}
+  FOX_SYNC_URL: 'https://gitlab.com/OrangeFox/sync.git'
+  FOX_SYNC_BRANCH: ${{ github.event.inputs.fox_branch || '12.1' }}
   SRC_DIR: 'aosp'
-  AERA_PRODUCT_PREFIX: 'AERA'
-  AERA_BUILD_DEVICE: 'm20lte'
-  AERA_BUILD_TYPE: 'Beta'
-  AERA_BUILD_STATUS: 'Unofficial'
-  AERA_MAINTAINER: 'txorav'
+  FOX_BUILD_TYPE: 'Unofficial'
+  FOX_BUILD_DEVICE: 'm20lte'
   OF_MAINTAINER: 'txorav'
   CCACHE_DIR: '${{ github.workspace }}/.ccache'
 
 jobs:
   build:
-    name: Build AERA Recovery for Samsung Galaxy M20 (m20lte)
+    name: Build OrangeFox Recovery for Samsung Galaxy M20 (m20lte)
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
@@ -66,9 +63,9 @@ jobs:
 
       - name: Show parameters & environment
         run: |
-          echo "AERA Manifest  : $AERA_MANIFEST_URL @ $AERA_MANIFEST_BRANCH"
-          echo "Lunch target   : ${{ inputs.makefile || 'twrp_m20lte-bp2a-eng' }}"
-          echo "Build target   : ${{ inputs.build_target || 'adbd recoveryimage' }}"
+          echo "OrangeFox Sync : $FOX_SYNC_URL @ $FOX_SYNC_BRANCH"
+          echo "Lunch target   : ${{ inputs.makefile || 'twrp_m20lte-eng' }}"
+          echo "Build target   : ${{ inputs.build_target || 'recoveryimage' }}"
           echo "Jobs           : ${{ inputs.jobs || '4' }}"
           echo "Free disk space before:"
           df -h /
@@ -97,36 +94,30 @@ jobs:
             lib32readline-dev lib32z1-dev libelf-dev liblz4-tool \
             libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
             lz4 pngcrush python3 rsync schedtool squashfs-tools unzip \
-            xz-utils zip zlib1g-dev openjdk-17-jdk-headless jq lzma liblzma-dev uuid-runtime
+            xz-utils zip zlib1g-dev openjdk-11-jdk-headless jq lzma liblzma-dev
           sudo ln -sf /usr/bin/python3 /usr/bin/python 2>/dev/null || true
           java -version 2>&1
 
-      - name: Set JDK 17
+      - name: Set JDK 11
         run: |
-          if [ -d "$JAVA_HOME_17_X64" ]; then
-            J="$JAVA_HOME_17_X64"
-          elif [ -x /usr/lib/jvm/java-17-openjdk-amd64/bin/java ]; then
-            J=/usr/lib/jvm/java-17-openjdk-amd64
+          if [ -d "$JAVA_HOME_11_X64" ]; then
+            J="$JAVA_HOME_11_X64"
+          elif [ -x /usr/lib/jvm/java-11-openjdk-amd64/bin/java ]; then
+            J=/usr/lib/jvm/java-11-openjdk-amd64
           else
             J=$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")
           fi
           echo "JAVA_HOME=$J" >> "$GITHUB_ENV"
           "$J/bin/java" -version 2>&1
 
-      - name: Configure swap memory & system settings
+      - name: Configure swap memory
         run: |
-          # Disable systemd-oomd to prevent premature SIGTERM (exit 143) on memory pressure
-          sudo systemctl stop systemd-oomd 2>/dev/null || true
-          sudo systemctl disable systemd-oomd 2>/dev/null || true
-
-          # Configure 32G swap for heavy AOSP/Soong compilation
           sudo swapoff -a 2>/dev/null || true
           sudo rm -f /swapfile 2>/dev/null || true
-          sudo fallocate -l 32G /swapfile
+          sudo fallocate -l 8G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
-          sudo sysctl vm.swappiness=30
           swapon --show
           free -h
 
@@ -144,9 +135,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-aera-m20lte-${{ github.run_id }}
+          key: ccache-ofox-m20lte-${{ github.run_id }}
           restore-keys: |
-            ccache-aera-m20lte-
+            ccache-ofox-m20lte-
 
       - name: Configure ccache
         if: ${{ (inputs.ccache || 'true') == 'true' }}
@@ -155,19 +146,20 @@ jobs:
           ccache -M 8G
           ccache --zero-stats || true
 
-      - name: Pre-download Magisk
+      - name: Pre-download Magisk for OrangeFox
         run: |
           mkdir -p "$HOME/Magisk"
           curl -fsSL -o "$HOME/Magisk/Magisk.zip" "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk" || true
           ls -lh "$HOME/Magisk/Magisk.zip" || true
 
-      - name: Sync AERA Recovery sources
+      - name: Sync OrangeFox sources
         run: |
           set -e
-          mkdir -p "$GITHUB_WORKSPACE/$SRC_DIR"
-          cd "$GITHUB_WORKSPACE/$SRC_DIR"
-          repo init --depth=1 -u "$AERA_MANIFEST_URL" -b "$AERA_MANIFEST_BRANCH"
-          repo sync -c --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune -j4
+          mkdir -p "$GITHUB_WORKSPACE/fox-sync"
+          git clone --depth=1 "$FOX_SYNC_URL" "$GITHUB_WORKSPACE/fox-sync"
+          cd "$GITHUB_WORKSPACE/fox-sync"
+          chmod +x ./orangefox_sync.sh
+          ./orangefox_sync.sh --branch "$FOX_SYNC_BRANCH" --path "$GITHUB_WORKSPACE/$SRC_DIR"
 
       - name: Install device tree
         run: |
@@ -180,114 +172,32 @@ jobs:
         run: |
           set -e
           rm -rf "$SRC_DIR/system/tools/mkbootimg"
-          git clone --depth=1 -b lineage-22.2 https://github.com/LineageOS/android_system_tools_mkbootimg "$SRC_DIR/system/tools/mkbootimg" || \
           git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_system_tools_mkbootimg "$SRC_DIR/system/tools/mkbootimg"
           echo "LineageOS mkbootimg installed successfully."
 
-      - name: Trim source tree & prune non-recovery projects for Soong
+      - name: Trim disk before build
         run: |
-          cd "$SRC_DIR"
-          echo "Disk space before pruning:"
+          du -sh "$SRC_DIR" 2>/dev/null || true
+          find "$SRC_DIR/prebuilts" -maxdepth 6 -type d -name .git -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$SRC_DIR/.repo/project-objects" -type d -name '*.git' -prune -exec rm -rf {} + 2>/dev/null || true
           df -h /
 
-          # Delete heavy non-recovery projects that are not needed by recovery
-          rm -rf cts platform_testing developers development test tools/tradefederation tools/test pdk
-
-          # In frameworks/base, delete root .bp files (which declare framework.jar & Java aconfig host flags) and ignore all subdirectories except libs
-          if [ -d "frameworks/base" ]; then
-            rm -f frameworks/base/*.bp
-            for d in frameworks/base/*; do
-              if [ -d "$d" ] && [ "$(basename "$d")" != "libs" ]; then
-                touch "$d/.find-ignore"
-              fi
-            done
-            if [ -d "frameworks/base/libs" ]; then
-              for d in frameworks/base/libs/*; do
-                if [ -d "$d" ] && [ "$(basename "$d")" != "androidfw" ]; then
-                  touch "$d/.find-ignore"
-                fi
-              done
-            fi
-            [ -d "frameworks/base/libs/androidfw/tests" ] && touch "frameworks/base/libs/androidfw/tests/.find-ignore"
-            [ -d "frameworks/base/libs/androidfw/fuzz" ] && touch "frameworks/base/libs/androidfw/fuzz/.find-ignore"
-            
-            # Patch androidfw to eliminate unused backup_flags aconfig dependency
-            if [ -f "frameworks/base/libs/androidfw/BackupHelpers.cpp" ]; then
-              sed -i 's|#include <com_android_server_backup.h>||g' frameworks/base/libs/androidfw/BackupHelpers.cpp
-              sed -i 's|namespace backup_flags = com::android::server::backup;|namespace backup_flags { inline bool enable_max_size_writes_to_pipes() { return true; } }|g' frameworks/base/libs/androidfw/BackupHelpers.cpp
-              echo "Patched BackupHelpers.cpp"
-            fi
-            if [ -f "frameworks/base/libs/androidfw/Android.bp" ]; then
-              python3 -c 'import re; p="frameworks/base/libs/androidfw/Android.bp"; c=open(p).read(); c=re.sub(r"cc_aconfig_library\s*\{[^}]*\}", "", c).replace("\"backup_flags_cc_lib\",", ""); open(p,"w").write(c)'
-              echo "Patched androidfw/Android.bp"
-            fi
-            echo "Pruned frameworks/base (kept only libs/androidfw)"
-          fi
-
-          # Prune other non-recovery frameworks and packages
-          for d in frameworks/opt frameworks/ex frameworks/layoutlib frameworks/multidex frameworks/libs packages/apps packages/providers packages/screensavers packages/wallpapers packages/services packages/inputmethods art/test kernel/tests device/amlogic device/google device/linaro device/generic/car device/generic/goldfish device/generic/goldfish-opengl device/generic/trusty device/generic/x86 device/generic/x86_64; do
-            if [ -d "$d" ]; then
-              touch "$d/.find-ignore"
-              echo "Added .find-ignore to $d"
-            fi
-          done
-
-          # Prune external/avb/rust, external/avb/test, and any directories using avb_add_hash_footer
-          [ -d "external/avb/rust" ] && touch "external/avb/rust/.find-ignore"
-          [ -d "external/avb/test" ] && touch "external/avb/test/.find-ignore"
-          [ -d "packages/modules/Virtualization" ] && touch "packages/modules/Virtualization/.find-ignore"
-          for f in $(grep -rl "avb_add_hash_footer" external packages system 2>/dev/null); do
-            d=$(dirname "$f")
-            touch "$d/.find-ignore"
-            echo "Ignored $d due to avb_add_hash_footer"
-          done
-
-          # Prune all remaining unit tests/fuzzers across the source tree (excluding build, recovery, lvgl, and device tree)
-          find . -maxdepth 6 -type d \( -name "tests" -o -name "test" -o -name "testing" -o -name "fuzz" \) \
-            -not -path "./build/*" \
-            -not -path "./bootable/recovery/*" \
-            -not -path "./external/lvgl/*" \
-            -not -path "./device/samsung/m20lte/*" \
-            -exec touch {}/.find-ignore \; 2>/dev/null || true
-
-          # Prune git packs in prebuilts to save space
-          find prebuilts -maxdepth 6 -type d -name .git -prune -exec rm -rf {} + 2>/dev/null || true
-          find .repo/project-objects -type d -name '*.git' -prune -exec rm -rf {} + 2>/dev/null || true
-
-          echo "Disk space after pruning:"
-          df -h /
-
-      - name: Compile AERA Recovery
+      - name: Compile OrangeFox
         env:
           USE_CCACHE: ${{ inputs.ccache || 'true' }}
           ALLOW_MISSING_DEPENDENCIES: 'true'
           BUILD_JOBS: ${{ inputs.jobs || '4' }}
-          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-bp2a-eng' }}
-          BUILD_TARGET: ${{ inputs.build_target || 'adbd recoveryimage' }}
+          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-eng' }}
+          BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
           BUILD_USERNAME: ${{ github.actor }}
-          BUILD_HOSTNAME: aera-builder
-          AERA_PRODUCT_PREFIX: AERA
-          AERA_BUILD_DEVICE: m20lte
-          AERA_BUILD_TYPE: Beta
-          AERA_BUILD_STATUS: Unofficial
-          AERA_MAINTAINER: txorav
+          BUILD_HOSTNAME: ofox-builder
+          FOX_BUILD_DEVICE: m20lte
+          FOX_BUILD_TYPE: Unofficial
           OF_MAINTAINER: txorav
-          AERA_CURRENT_DEV_STR: '2026-10-27 (aera-16.0)'
         run: |
           cd "$SRC_DIR"
           set -o pipefail
           : > build.log
-
-          LUNCH_TARGET="$MAKEFILE_NAME"
-          if [[ "$LUNCH_TARGET" == *"-eng" && "$LUNCH_TARGET" != *"-"*"-eng" ]]; then
-            PROD=$(echo "$LUNCH_TARGET" | cut -d'-' -f1)
-            LUNCH_TARGET="${PROD}-bp2a-eng"
-          elif [[ "$LUNCH_TARGET" == *"-userdebug" && "$LUNCH_TARGET" != *"-"*"-userdebug" ]]; then
-            PROD=$(echo "$LUNCH_TARGET" | cut -d'-' -f1)
-            LUNCH_TARGET="${PROD}-bp2a-userdebug"
-          fi
-          echo "Resolved lunch target: $LUNCH_TARGET"
-
           set +e
           source build/envsetup.sh >> build.log 2>&1
           ENVSETUP_RC=$?
@@ -300,7 +210,7 @@ jobs:
           fi
 
           set +e
-          lunch "$LUNCH_TARGET" >> build.log 2>&1
+          lunch "$MAKEFILE_NAME" >> build.log 2>&1
           LUNCH_RC=$?
           set -e
           tail -n 30 build.log || true
@@ -309,58 +219,26 @@ jobs:
             exit 1
           fi
           export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE
-
-          # Start background heartbeat to prevent GitHub Actions 20-min silence timeout
-          ( while true; do sleep 60; echo "[HEARTBEAT $(date +'%H:%M:%S')] Mem: $(free -h | awk '/Mem:/ {print $3 "/" $2}') | Swap: $(free -h | awk '/Swap:/ {print $3 "/" $2}') | Disk: $(df -h / | awk 'NR==2 {print $4}') free"; done ) &
-          HEARTBEAT_PID=$!
-          trap 'kill $HEARTBEAT_PID 2>/dev/null || true' EXIT
-
           mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
-          BUILD_RC=${PIPESTATUS[0]}
-
-          kill $HEARTBEAT_PID 2>/dev/null || true
-          trap - EXIT
-
-          if [ $BUILD_RC -ne 0 ]; then
-            echo "::error::mka failed with exit code $BUILD_RC"
-            tail -n 60 build.log || true
-            exit 1
-          fi
 
       - name: Package Odin Tar & Checksums
         if: success()
         run: |
           OUT_DIR="$SRC_DIR/out/target/product/m20lte"
-          if [ -d "$OUT_DIR" ]; then
+          if [ -f "$OUT_DIR/recovery.img" ]; then
+            echo "Packaging Odin tar archives..."
             cd "$OUT_DIR"
-            if [ -f "recovery.img" ]; then
-              echo "Packaging Odin tar archives for recovery.img..."
-              tar -H ustar -c recovery.img > recovery.tar
-              cp -f recovery.tar recovery.tar.md5
-              md5sum -t recovery.tar.md5 >> recovery.tar.md5
-              md5sum recovery.img > recovery.img.md5
-              sha256sum recovery.img > recovery.img.sha256
-            fi
-            for img in AERA-*.img; do
-              if [ -f "$img" ]; then
-                base="${img%.img}"
-                echo "Packaging Odin tar archive for $img..."
-                tar -H ustar -c "$img" > "${base}.tar"
-                cp -f "${base}.tar" "${base}.tar.md5"
-                md5sum -t "${base}.tar.md5" >> "${base}.tar.md5"
-                md5sum "$img" > "${img}.md5"
-                sha256sum "$img" > "${img}.sha256"
-              fi
-            done
-            for zip in AERA-*.zip; do
-              if [ -f "$zip" ]; then
-                md5sum "$zip" | awk '{print $1}' > "${zip}.md5"
-                sha256sum "$zip" | awk '{print $1}' > "${zip}.sha256"
-              fi
-            done
+            tar -H ustar -c recovery.img > recovery.tar
+            cp -f recovery.tar recovery.tar.md5
+            md5sum -t recovery.tar.md5 >> recovery.tar.md5
+            md5sum recovery.img > recovery.img.md5
+            sha256sum recovery.img > recovery.img.sha256
             cd "$GITHUB_WORKSPACE"
-            ls -lh "$OUT_DIR"
           fi
+          find "$OUT_DIR" -maxdepth 1 -name "*.zip" | while read -r z; do
+            md5sum "$z" | awk '{print $1}' > "${z}.md5"
+          done
+          ls -lh "$OUT_DIR"
 
       - name: Show ccache stats
         if: always()
@@ -370,21 +248,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aera-m20lte-build-log
-          path: |
-            ${{ env.SRC_DIR }}/build.log
-            ${{ env.SRC_DIR }}/out/soong.log
-            ${{ env.SRC_DIR }}/out/error.log
+          name: orangefox-m20lte-build-log
+          path: ${{ env.SRC_DIR }}/build.log
           if-no-files-found: ignore
 
       - name: Upload recovery artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: aera-m20lte-recovery
+          name: orangefox-m20lte-recovery
           path: |
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/AERA-*
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.*
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.zip
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.md5
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.sha256
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.tar
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.img
           if-no-files-found: warn
 
       - name: Create GitHub Release
@@ -392,8 +270,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/AERA-*
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.*
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.zip
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.md5
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.sha256
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.tar
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.img
           generate_release_notes: true
 
       - name: Upload Artifacts to Gofile & Notify Telegram
@@ -404,12 +285,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: '8477945979:AAGTYiUAfnPjQFpkh576D7Xsqm0RDQJr_As'
           TELEGRAM_CHAT_ID: '8198896729'
           JOB_STATUS: ${{ job.status }}
-          RECOVERY_FLAVOR: 'AERA'
+          RECOVERY_FLAVOR: 'OrangeFox'
         run: |
           python3 - << 'EOF'
           import os, glob, hashlib, json, subprocess, urllib.request
 
-          flavor = os.environ.get("RECOVERY_FLAVOR", "AERA")
+          flavor = os.environ.get("RECOVERY_FLAVOR", "Recovery")
           status = os.environ.get("JOB_STATUS", "failure")
           gofile_token = os.environ.get("GOFILE_TOKEN", "")
           tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -439,16 +320,7 @@ jobs:
               exit(0)
 
           target_dir = f"{src_dir}/out/target/product/m20lte"
-          files = sorted(glob.glob(f"{target_dir}/AERA-*.zip") + glob.glob(f"{target_dir}/AERA-*.tar") + glob.glob(f"{target_dir}/*.zip") + glob.glob(f"{target_dir}/*.tar") + glob.glob(f"{target_dir}/recovery.img"))
-          # Deduplicate while preserving order
-          seen = set()
-          unique_files = []
-          for f in files:
-              if f not in seen and not f.endswith(".md5") and not f.endswith(".sha256"):
-                  seen.add(f)
-                  unique_files.append(f)
-          files = unique_files
-
+          files = sorted(glob.glob(f"{target_dir}/*.zip") + glob.glob(f"{target_dir}/*.tar") + glob.glob(f"{target_dir}/recovery.img"))
           if not files:
               send_tg(f"⚠️ <b>{flavor} Build Succeeded</b> but no recovery artifacts were found in {target_dir}.\n⏱ Run: <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">#{run_id}</a>")
               exit(0)
