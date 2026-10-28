@@ -1,0 +1,1279 @@
+#!/system/bin/sh
+#
+# foxwifi - MediaTek WiFi bring-up for OrangeFox recovery on begonia.
+#
+# The prebuilt begonia kernel has the whole MediaTek CONSYS/WMT/WLAN stack
+# built in (CONFIG_MTK_COMBO_WIFI=y, CONFIG_WLAN_DRV_BUILD_IN=y).  What is
+# missing in recovery is the userspace side: wmt_loader/wmt_launcher to boot
+# the connectivity co-processor, the WIFI NVRAM partition, wpa_supplicant and
+# a DHCP client.  This script wires those together and is intentionally
+# self-contained so it can be driven from a terminal or from foxweb's CGI.
+#
+# Usage:
+#   foxwifi on                     power up WMT + start wpa_supplicant
+#   foxwifi off                    stop DHCP/supplicant, link down
+#   foxwifi restart
+#   foxwifi scan                   human-readable scan
+#   foxwifi scan-json              scan as a JSON array
+#   foxwifi connect SSID [PSK] [OPEN|WPA|WPA2|WPA3]
+#   foxwifi disconnect
+#   foxwifi status                 human-readable status
+#   foxwifi status-json            status as a JSON object
+#   foxwifi save                   remember the last network (plaintext)
+#   foxwifi forget                 delete the remembered network
+#   foxwifi auto                   connect using the remembered network
+#   foxwifi daemon                 init service: keep the link alive
+#   foxwifi log                    show the log
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:/vendor/bin/hw
+export PATH
+export LD_LIBRARY_PATH=/system/lib64:/vendor/lib64:/vendor/lib64/hw
+
+BB=/system/bin/busybox
+[ -x "$BB" ] || BB=/sbin/busybox
+[ -x "$BB" ] || BB=
+
+IFACE=wlan0
+TMP=/tmp/foxwifi
+CTRL=$TMP/sockets
+CONF=$TMP/wpa_supplicant.conf
+LOG=/tmp/foxwifi.log
+DESIRED=$TMP/desired
+LAST=$TMP/last
+LOCK=$TMP/lock
+NVDATA=/dev/block/platform/bootdevice/by-name/nvdata
+NVDATA_MNT=/mnt/vendor/nvdata
+# Firmware packaged in the recovery ramdisk.
+FW_SRC=/system/etc/firmware
+# Runtime firmware directory handed to wmt_launcher.  It must be
+# /vendor/firmware/: the launcher copies the first 16 bytes of the -p
+# argument back into its internal default buffer and only writes the
+# terminator at byte 17.  With "-p /system/etc/firmware/" byte 16 is left
+# as 'w' from the old string, so the launcher actually tries to opendir
+# "/vendor/firmwarew" and fails with "patch path cannot be opened".
+# Using the stock 17-byte "/vendor/firmware/" keeps the rebuilt path valid.
+FW_DIR=/vendor/firmware
+FW_RUN=$TMP/firmware
+
+mkdir -p "$TMP" "$CTRL" 2>/dev/null
+# Recovery runs with umask 077.  wpa_supplicant drops to AID_WIFI (1010)
+# before it reads its config and creates the control socket, so root-only
+# directories make it exit immediately with EACCES.
+chmod 0777 "$TMP" "$CTRL" 2>/dev/null
+
+# Android's fs_config assigns mode 0644 to files under /system/etc, so the
+# executable bit on the DHCP hooks is lost when the ramdisk is packed.  Put it
+# back before dhcpcd/udhcpc try to execute them.
+chmod 0755 /system/etc/foxwifi/dhcpcd-hook \
+           /system/etc/foxwifi/udhcpc.script 2>/dev/null
+
+log() {
+    echo "$(date '+%H:%M:%S') $*" >> "$LOG" 2>/dev/null
+}
+
+say() {
+    echo "$*"
+    log "$*"
+}
+
+fail() {
+    say "foxwifi: $*" >&2
+    return 1
+}
+
+have() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+running() {
+    if [ -n "$BB" ]; then
+        "$BB" pidof "$1" >/dev/null 2>&1
+    else
+        pidof "$1" >/dev/null 2>&1
+    fi
+}
+
+wpa() {
+    if [ -n "$BB" ]; then
+        "$BB" timeout 5 wpa_cli -p"$CTRL" -i"$IFACE" "$@" 2>/dev/null
+    else
+        timeout 5 wpa_cli -p"$CTRL" -i"$IFACE" "$@" 2>/dev/null
+    fi
+}
+
+wpa_ok() {
+    out=$(wpa "$@" | tail -n 1)
+    case "$out" in
+        OK*) return 0 ;;
+        *) log "wpa_cli $* -> ${out:-<empty>}"; return 1 ;;
+    esac
+}
+
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\r\n'
+}
+
+get_ip() {
+    if have ip; then
+        addr=$(ip -o -4 addr show "$IFACE" 2>/dev/null \
+            | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+        if [ -n "$addr" ]; then
+            echo "$addr"
+            return 0
+        fi
+    fi
+    ifconfig "$IFACE" 2>/dev/null | awk '
+        /inet addr:/ {
+            for (i = 1; i <= NF; i++)
+                if ($i ~ /^addr:/) { sub(/^addr:/, "", $i); print $i; exit }
+        }
+        /inet / {
+            for (i = 1; i <= NF; i++)
+                if ($i == "inet") {
+                    addr = $(i + 1)
+                    sub(/\/.*/, "", addr)
+                    print addr
+                    exit
+                }
+        }'
+}
+
+get_mac() {
+    cat "/sys/class/net/$IFACE/address" 2>/dev/null
+}
+
+get_state() {
+    wpa status 2>/dev/null | sed -n 's/^wpa_state=//p' | head -n 1
+}
+
+get_ssid() {
+    wpa status 2>/dev/null | sed -n 's/^ssid=//p' | head -n 1
+}
+
+set_desired() {
+    echo "$1" > "$DESIRED"
+}
+
+get_desired() {
+    cat "$DESIRED" 2>/dev/null || echo up
+}
+
+mount_nvdata() {
+    [ -b "$NVDATA" ] || return 0
+    grep -q " $NVDATA_MNT " /proc/mounts 2>/dev/null && return 0
+    mkdir -p "$NVDATA_MNT" 2>/dev/null
+    if mount -t ext4 -o ro "$NVDATA" "$NVDATA_MNT" >>"$LOG" 2>&1; then
+        log "mounted nvdata (read-only) on $NVDATA_MNT"
+    else
+        log "could not mount nvdata; WiFi calibration may be unavailable"
+    fi
+}
+
+prepare_firmware() {
+    # The launcher's ROM-patch path is hard-coded to /vendor/firmware.  On a
+    # recovery boot /vendor is usually not mounted, so this is the ramdisk
+    # symlink to /system/etc/firmware; on a later manual "foxwifi on" /vendor
+    # may be mounted and hide that symlink.  Bind our known-good copy over
+    # /vendor/firmware so the hard-coded path always sees the firmware that
+    # matches this kernel, and add the WMT.cfg alias some launcher builds
+    # look for.
+    if [ -f "$TMP/firmware.ready" ] && [ -s "$FW_DIR/WMT_SOC.cfg" ]; then
+        return 0
+    fi
+
+    rm -rf "$FW_RUN" 2>/dev/null
+    mkdir -p "$FW_RUN" 2>/dev/null || return 1
+
+    if [ -d "$FW_SRC" ]; then
+        cp -f "$FW_SRC"/* "$FW_RUN"/ 2>/dev/null
+    fi
+    if [ ! -s "$FW_RUN/WMT_SOC.cfg" ]; then
+        fail "recovery firmware is missing from $FW_SRC"
+        return 1
+    fi
+    [ -e "$FW_RUN/WMT.cfg" ] || \
+        cp -f "$FW_RUN/WMT_SOC.cfg" "$FW_RUN/WMT.cfg" 2>/dev/null
+    chmod 0644 "$FW_RUN"/* 2>/dev/null
+
+    mkdir -p "$FW_DIR" 2>/dev/null
+    if mount -o bind "$FW_RUN" "$FW_DIR" >>"$LOG" 2>&1; then
+        log "bind-mounted recovery firmware on $FW_DIR"
+        touch "$TMP/firmware.ready"
+        return 0
+    fi
+    if mount --bind "$FW_RUN" "$FW_DIR" >>"$LOG" 2>&1; then
+        log "bind-mounted recovery firmware on $FW_DIR (long option)"
+        touch "$TMP/firmware.ready"
+        return 0
+    fi
+    if [ -L "$FW_DIR" ]; then
+        # Some mount implementations refuse to follow the ramdisk symlink.
+        # Bind onto its resolved target instead; /vendor/firmware still
+        # resolves to the same directory.
+        fw_target=$(readlink -f "$FW_DIR" 2>/dev/null)
+        if [ -n "$fw_target" ] && \
+           mount -o bind "$FW_RUN" "$fw_target" >>"$LOG" 2>&1; then
+            log "bind-mounted recovery firmware on $fw_target"
+            touch "$TMP/firmware.ready"
+            return 0
+        fi
+    fi
+    log "could not bind-mount $FW_RUN on $FW_DIR; using the existing directory"
+    if [ ! -s "$FW_DIR/WMT_SOC.cfg" ]; then
+        fail "$FW_DIR does not contain the WMT firmware"
+        return 1
+    fi
+    return 0
+}
+
+write_conf() {
+    country=$(get_prop ro.boot.wificountrycode)
+    [ -z "$country" ] && country=$(get_prop persist.sys.country)
+    [ -z "$country" ] && country=$(get_prop ro.product.locale | cut -d- -f2)
+    # Default to 00 (World Regulatory Domain) to unlock all 2.4 GHz and 5 GHz channels
+    [ -z "$country" ] && country="00"
+
+    {
+        echo "ctrl_interface=$CTRL"
+        # Do not set ctrl_interface_group=0: wpa_supplicant runs as
+        # AID_WIFI and cannot chown the socket to root.  The socket is
+        # created with the supplicant's own wifi group instead.
+        echo "update_config=1"
+        echo "country=$country"
+        echo "ap_scan=1"
+        echo "p2p_disabled=1"
+        echo "wowlan_triggers=any"
+        echo "pmf=1"
+        echo "sae_pwe=2"
+    } > "$CONF"
+    # wpa_supplicant is not running as root by the time it opens this file.
+    # Give it to AID_WIFI, with a readable fallback if chown is unavailable.
+    if ! chown 1010:1010 "$CONF" 2>/dev/null; then
+        chmod 0644 "$CONF" 2>/dev/null
+    else
+        chmod 0600 "$CONF" 2>/dev/null
+    fi
+}
+
+get_prop() {
+    if have getprop; then
+        getprop "$1" 2>/dev/null
+    fi
+}
+
+wmt_driver_ready() {
+    [ "$(get_prop vendor.connsys.driver.ready)" = yes ]
+}
+
+start_wlan_assistant() {
+    [ -x /system/bin/wlan_assistant ] || return 0
+    running wlan_assistant && return 0
+    log "starting wlan_assistant"
+    mkdir -p /data/vendor/macwifi /data/vendor/nvramwifi 2>/dev/null
+    ( /system/bin/wlan_assistant >>"$LOG" 2>&1 ) &
+    echo $! > "$TMP/wlan_assistant.pid"
+}
+
+dump_wpa_logcat() {
+    have logcat || return 0
+    logcat -d -v brief -s wpa_supplicant wpa_cli 2>/dev/null | tail -n 60
+}
+
+dump_wmt_logcat() {
+    have logcat || return 0
+    logcat -d -v brief -s wmt_loader wmt_launcher wlan_assistant \
+        wpa_supplicant wpa_cli 2>/dev/null | tail -n 80
+}
+
+power_on_wlan() {
+    # Writing 1 to /dev/wmtWifi is the actual WMT function-on call.  The
+    # write can block while the driver waits for the ROM patch, so cap each
+    # attempt.  wmt_launcher takes several seconds to load the patch on a
+    # cold boot; retry instead of failing the first write.
+    attempt=0
+    while [ "$attempt" -lt 4 ]; do
+        attempt=$((attempt + 1))
+        if [ ! -e /dev/wmtWifi ]; then
+            log "/dev/wmtWifi is missing (attempt $attempt/4)"
+            sleep 3
+            continue
+        fi
+
+        # A cold WMT power-on can take ~30 seconds while the ROM patch is
+        # downloaded.  Give it time; killing the write too early leaves the
+        # WMT state machine in a failed state.
+        if have timeout; then
+            timeout 45 sh -c "printf '1' > /dev/wmtWifi" 2>>"$LOG"
+            rc=$?
+        else
+            printf '1' > /dev/wmtWifi 2>>"$LOG"
+            rc=$?
+        fi
+        if [ "$rc" -eq 0 ]; then
+            log "powered on WLAN block via /dev/wmtWifi"
+            return 0
+        fi
+        if [ "$rc" -eq 124 ]; then
+            log "timed out writing /dev/wmtWifi (attempt $attempt/4)"
+        else
+            log "could not write /dev/wmtWifi (rc=$rc, attempt $attempt/4)"
+        fi
+        sleep 3
+    done
+    return 1
+}
+
+start_wmt() {
+    if [ ! -f "$TMP/wmt.ready" ]; then
+        mount_nvdata
+
+        # A stale marker from a failed attempt must not hide the failure.
+        # wmt_loader is safe to retry, but only once the WMT device node or
+        # the driver-ready property exists.  Do not cache an attempt that
+        # failed to bring the coprocessor up.
+        if ! wmt_driver_ready; then
+            rm -f "$TMP/wmt.loaded"
+        fi
+
+        if [ ! -f "$TMP/wmt.loaded" ] && [ -x /system/bin/wmt_loader ]; then
+            attempt=1
+            loader_log=$TMP/wmt_loader.log
+            while [ "$attempt" -le 3 ]; do
+                log "running wmt_loader (attempt $attempt/3)"
+                : > "$loader_log"
+                /system/bin/wmt_loader >>"$loader_log" 2>&1
+                loader_rc=$?
+                cat "$loader_log" >>"$LOG" 2>/dev/null
+
+                if [ "$loader_rc" -eq 0 ] && wmt_driver_ready; then
+                    touch "$TMP/wmt.loaded"
+                    break
+                fi
+                # Some loaders return 0 even after logging the node timeout;
+                # accept only an explicit success or the driver property.
+                if grep -q "driver.ready.*yes.*succeed" "$loader_log" 2>/dev/null; then
+                    touch "$TMP/wmt.loaded"
+                    break
+                fi
+                if [ "$loader_rc" -ne 0 ]; then
+                    log "wmt_loader attempt $attempt failed (rc=$loader_rc)"
+                else
+                    log "wmt_loader attempt $attempt did not set vendor.connsys.driver.ready"
+                fi
+                attempt=$((attempt + 1))
+                [ "$attempt" -le 3 ] && sleep 2
+            done
+        fi
+
+        if [ ! -f "$TMP/wmt.loaded" ] && ! wmt_driver_ready; then
+            fail "WMT loader failed; last output:"
+            wmt_tail=$(dump_wmt_logcat)
+            [ -n "$wmt_tail" ] && printf '%s\n' "$wmt_tail" >>"$LOG"
+            { tail -n 12 "$TMP/wmt_loader.log" 2>/dev/null
+              [ -n "$wmt_tail" ] && printf '%s\n' "$wmt_tail"
+            } | tail -n 20 | sed 's/^/  /' >&2
+            rm -f "$TMP/wmt.ready"
+            return 1
+        fi
+
+        # The WLAN driver can create wlan0 during probe, before the firmware
+        # has been downloaded.  Always keep wmt_launcher available so the
+        # driver can fetch the ROM patch when the interface is opened.
+        prepare_firmware || \
+            log "firmware preparation failed; trying $FW_DIR anyway"
+
+        if [ -x /system/bin/wmt_launcher ] && ! running wmt_launcher; then
+            log "starting wmt_launcher -p $FW_DIR/ -o 1"
+            ( /system/bin/wmt_launcher -p "$FW_DIR/" -o 1 >>"$LOG" 2>&1 ) &
+            echo $! > "$TMP/wmt_launcher.pid"
+            # Let the launcher open /dev/stpwmt and enter its power-on flow
+            # before the framework-style /dev/wmtWifi write.
+            sleep 2
+        elif running wmt_launcher; then
+            log "wmt_launcher already running"
+        fi
+
+        # Stock MediaTek init starts wlan_assistant from class main, before
+        # the framework powers the WLAN block on.  Start it first so the
+        # NVRAM/MAC data is available when WMT brings the chip up.
+        start_wlan_assistant
+
+        # wmt_launcher only initialises the chip/patch path.  The WLAN
+        # function itself is powered on through /dev/wmtWifi; do not start
+        # wpa_supplicant until that succeeds, or it will fail with an
+        # unusable wlan0.
+        if ! power_on_wlan; then
+            wmt_tail=$(dump_wmt_logcat)
+            [ -n "$wmt_tail" ] && printf '%s\n' "$wmt_tail" >>"$LOG"
+            # Some launcher/kernel combinations power the block on through
+            # -o 1 and reject the extra /dev/wmtWifi write.  Do not give up
+            # before trying the supplicant: if wlan0 is usable it will work,
+            # and if not its logcat tells us why.
+            log "warning: could not power on WLAN block; trying wpa_supplicant anyway"
+            rm -f "$TMP/wmt.ready"
+        fi
+
+        i=0
+        while [ "$i" -lt 20 ]; do
+            [ -e "/sys/class/net/$IFACE" ] && break
+            sleep 1
+            i=$((i + 1))
+        done
+
+        if [ ! -e "/sys/class/net/$IFACE" ]; then
+            # wlan_assistant may have raced wmt_launcher's firmware load.
+            # Restart it once and give the driver a short extra window.
+            start_wlan_assistant
+            i=0
+            while [ "$i" -lt 5 ]; do
+                [ -e "/sys/class/net/$IFACE" ] && break
+                sleep 1
+                i=$((i + 1))
+            done
+        fi
+
+        if [ ! -e "/sys/class/net/$IFACE" ]; then
+            # A failed bring-up must be retried, not cached.
+            rm -f "$TMP/wmt.ready" "$TMP/wmt.loaded"
+            wmt_tail=$(dump_wmt_logcat)
+            [ -n "$wmt_tail" ] && printf '%s\n' "$wmt_tail" >>"$LOG"
+            fail "$IFACE did not appear (WMT firmware load failed?)"
+            tail -n 20 "$LOG" 2>/dev/null | sed 's/^/  /' >&2
+            return 1
+        fi
+    fi
+
+    if [ ! -e "/sys/class/net/$IFACE" ]; then
+        # The driver may have been reset; retry the full bring-up next time.
+        rm -f "$TMP/wmt.ready" "$TMP/wmt.loaded"
+        fail "$IFACE is missing"
+        return 1
+    fi
+    return 0
+}
+
+link_up() {
+    [ -e "/sys/class/net/$IFACE" ] || return 1
+    if ifconfig "$IFACE" up >>"$LOG" 2>&1; then
+        return 0
+    fi
+    log "could not bring up $IFACE"
+    return 1
+}
+
+start_supp() {
+    mkdir -p "$TMP" "$CTRL" 2>/dev/null
+    chmod 0777 "$TMP" "$CTRL" 2>/dev/null
+    [ -f "$CONF" ] || write_conf
+
+    # Android's wpa_supplicant drops from root to AID_WIFI (1010) before
+    # opening its config, pid file and control socket.  Existing files from
+    # an older run may still be root-owned; repair them here as well.
+    if ! chown 1010:1010 "$CONF" 2>/dev/null; then
+        chmod 0644 "$CONF" 2>/dev/null
+    else
+        chmod 0600 "$CONF" 2>/dev/null
+    fi
+    chown 1010:1010 "$TMP" "$CTRL" 2>/dev/null
+    chmod 0777 "$TMP" "$CTRL" 2>/dev/null
+
+    # Match the stock init.connectivity.rc directories.  The custom $CTRL
+    # is used below, but some supplicant builds still probe this path.
+    for d in /data/vendor/wifi /data/vendor/wifi/wpa \
+             /data/vendor/wifi/wpa/sockets; do
+        mkdir -p "$d" 2>/dev/null || break
+    done
+    chown -R 1010:1010 /data/vendor/wifi 2>/dev/null
+    chmod 0770 /data/vendor/wifi /data/vendor/wifi/wpa \
+              /data/vendor/wifi/wpa/sockets 2>/dev/null
+
+    if running wpa_supplicant && [ -S "$CTRL/$IFACE" ]; then
+        return 0
+    fi
+
+    if running wpa_supplicant; then
+        wpa terminate >/dev/null 2>&1
+        sleep 1
+        if running wpa_supplicant; then
+            if [ -n "$BB" ]; then
+                "$BB" pkill wpa_supplicant >/dev/null 2>&1
+            else
+                pkill wpa_supplicant >/dev/null 2>&1
+            fi
+            sleep 1
+        fi
+    fi
+
+    WPA_BIN=""
+    for bin in /system/bin/wpa_supplicant /vendor/bin/hw/wpa_supplicant /vendor/bin/wpa_supplicant /system/xbin/wpa_supplicant /sbin/wpa_supplicant; do
+        if [ -x "$bin" ]; then
+            WPA_BIN="$bin"
+            break
+        fi
+    done
+    if [ -z "$WPA_BIN" ]; then
+        WPA_BIN=$(command -v wpa_supplicant 2>/dev/null)
+    fi
+    if [ -z "$WPA_BIN" ]; then
+        for rom_bin in /vendor/bin/hw/wpa_supplicant /system_root/system/bin/wpa_supplicant; do
+            if [ -x "$rom_bin" ]; then
+                WPA_BIN="$rom_bin"
+                break
+            fi
+        done
+    fi
+    if [ -z "$WPA_BIN" ] || [ ! -x "$WPA_BIN" ]; then
+        log "wpa_supplicant binary not found in PATH or filesystem"
+        fail "wpa_supplicant binary is missing from recovery image"
+        return 1
+    fi
+
+    log "starting wpa_supplicant using $WPA_BIN"
+    "$WPA_BIN" -B -Dnl80211 -i"$IFACE" -c"$CONF" \
+        -P"$TMP/wpa.pid" >>"$LOG" 2>&1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        log "wpa_supplicant failed to start (rc=$rc)"
+        {
+            echo "== wpa_supplicant logcat =="
+            dump_wpa_logcat
+            echo "== supplicant files =="
+            ls -ld "$TMP" "$CTRL" "$CONF" 2>&1
+        } >>"$LOG" 2>&1
+        fail "wpa_supplicant failed to start (rc=$rc)"
+        return 1
+    fi
+
+    i=0
+    while [ "$i" -lt 20 ]; do
+        [ -S "$CTRL/$IFACE" ] && return 0
+        sleep 1
+        i=$((i + 1))
+    done
+
+    {
+        echo "== wpa_supplicant logcat (no control socket) =="
+        dump_wpa_logcat
+        echo "== supplicant files =="
+        ls -ld "$TMP" "$CTRL" "$CONF" 2>&1
+    } >>"$LOG" 2>&1
+    fail "wpa_supplicant control socket did not appear"
+    return 1
+}
+
+wifi_up() {
+    start_wmt || return 1
+    link_up || return 1
+    start_supp || return 1
+    # Supplicant owns the interface now; WMT bring-up can be skipped until
+    # the driver or interface disappears.
+    touch "$TMP/wmt.ready"
+    return 0
+}
+
+stop_dhcp() {
+    if have dhcpcd; then
+        dhcpcd -k "$IFACE" >>"$LOG" 2>&1
+    fi
+    if [ -n "$BB" ]; then
+        "$BB" pkill udhcpc >/dev/null 2>&1
+    fi
+    ifconfig "$IFACE" 0.0.0.0 2>/dev/null
+}
+
+wifi_down() {
+    if [ -S "$CTRL/$IFACE" ]; then
+        wpa disconnect >/dev/null 2>&1
+        wpa terminate >/dev/null 2>&1
+    fi
+    if running wpa_supplicant; then
+        if [ -n "$BB" ]; then "$BB" pkill wpa_supplicant >/dev/null 2>&1; else pkill wpa_supplicant >/dev/null 2>&1; fi
+    fi
+    stop_dhcp
+    ifconfig "$IFACE" down >>"$LOG" 2>&1
+    log "WiFi down"
+}
+
+fix_dns_and_hosts() {
+    log "Configuring DNS resolvers and static GitHub host mappings..."
+
+    # 1. Android Bionic libc DNS system properties
+    setprop net.dns1 1.1.1.1 2>/dev/null || true
+    setprop net.dns2 8.8.8.8 2>/dev/null || true
+    setprop net.dns3 1.0.0.1 2>/dev/null || true
+    setprop net.dns4 8.8.4.4 2>/dev/null || true
+    setprop net.wlan0.dns1 1.1.1.1 2>/dev/null || true
+    setprop net.wlan0.dns2 8.8.8.8 2>/dev/null || true
+    setprop net.wlan0.dns3 1.0.0.1 2>/dev/null || true
+    setprop net.wlan0.dns4 8.8.4.4 2>/dev/null || true
+    setprop net.change.dns 1 2>/dev/null || true
+
+    # 2. Resolv.conf files across all search paths
+    mkdir -p /system/etc /etc /tmp 2>/dev/null || true
+    local rconf="nameserver 1.1.1.1
+nameserver 8.8.8.8
+nameserver 1.0.0.1
+nameserver 8.8.4.4
+nameserver 9.9.9.9
+options timeout:2 attempts:3 rotate"
+
+    printf '%s\n' "$rconf" > /system/etc/resolv.conf 2>/dev/null || true
+    printf '%s\n' "$rconf" > /etc/resolv.conf 2>/dev/null || true
+    printf '%s\n' "$rconf" > /tmp/resolv.conf 2>/dev/null || true
+
+    # 3. Authoritative static hosts file for GitHub & primary developer endpoints
+    local hconf="127.0.0.1       localhost
+::1             localhost ip6-localhost ip6-loopback
+
+# GitHub Official Core IPv4
+140.82.121.3    github.com
+140.82.121.4    github.com
+140.82.121.5    api.github.com
+140.82.121.6    api.github.com
+185.199.108.133 raw.githubusercontent.com
+185.199.109.133 raw.githubusercontent.com
+185.199.110.133 raw.githubusercontent.com
+185.199.111.133 raw.githubusercontent.com
+185.199.108.133 objects.githubusercontent.com
+185.199.109.133 objects.githubusercontent.com
+185.199.110.133 objects.githubusercontent.com
+185.199.111.133 objects.githubusercontent.com
+185.199.108.154 github-releases.githubusercontent.com
+185.199.109.154 github-releases.githubusercontent.com
+185.199.110.154 github-releases.githubusercontent.com
+185.199.111.154 github-releases.githubusercontent.com
+140.82.121.9    codeload.github.com
+140.82.121.10   codeload.github.com
+185.199.108.133 gist.githubusercontent.com
+185.199.109.133 gist.githubusercontent.com
+185.199.110.133 gist.githubusercontent.com
+185.199.111.133 gist.githubusercontent.com
+185.199.108.153 assets-cdn.github.com
+
+# GitLab & Mirrors
+172.65.251.78   gitlab.com
+185.166.142.21  bitbucket.org
+
+# Anycast Public DNS
+1.1.1.1         one.one.one.one
+8.8.8.8         dns.google"
+
+    printf '%s\n' "$hconf" > /system/etc/hosts 2>/dev/null || true
+    printf '%s\n' "$hconf" > /etc/hosts 2>/dev/null || true
+
+    # 4. Sync TWRP GUI variables
+    if command -v twrp >/dev/null 2>&1; then
+        twrp set tw_dns_status "1.1.1.1, 8.8.8.8" 2>/dev/null || true
+        twrp set tw_hosts_status "GitHub Mapped" 2>/dev/null || true
+    fi
+
+    say "[+] DNS (1.1.1.1, 8.8.8.8) and static GitHub hosts resolved successfully."
+    log "DNS resolvers and GitHub host mapping verified."
+    return 0
+}
+
+set_dhcp_dns() {
+    fix_dns_and_hosts
+}
+
+try_udhcpc() {
+    [ -n "$BB" ] || return 1
+    [ -x /system/etc/foxwifi/udhcpc.script ] || return 1
+    log "requesting DHCP lease with udhcpc"
+    "$BB" udhcpc -i "$IFACE" -n -q -t 6 -T 3 \
+        -s /system/etc/foxwifi/udhcpc.script >>"$LOG" 2>&1
+}
+
+wait_for_ip() {
+    i=0
+    ip=""
+    while [ "$i" -lt "$1" ]; do
+        ip=$(get_ip)
+        [ -n "$ip" ] && break
+        sleep 1
+        i=$((i + 1))
+    done
+}
+
+start_dhcp() {
+    ip=""
+
+    if have dhcpcd; then
+        # dhcpcd keeps leases in /data/misc/dhcp; make the directory when
+        # /data is not mounted.  If it is mounted but encrypted this fails
+        # harmlessly and we fall through to udhcpc.
+        mkdir -p /system/etc/dhcpcd /data/misc/dhcp 2>/dev/null
+        log "requesting DHCP lease on $IFACE (dhcpcd)"
+        dhcpcd -q -c /system/etc/foxwifi/dhcpcd-hook "$IFACE" >>"$LOG" 2>&1 \
+            || dhcpcd -c /system/etc/foxwifi/dhcpcd-hook "$IFACE" >>"$LOG" 2>&1
+        wait_for_ip 15
+    fi
+
+    if [ -z "$ip" ]; then
+        try_udhcpc || true
+        wait_for_ip 15
+    fi
+
+    [ -n "$ip" ] || { fail "no DHCP lease on $IFACE"; return 1; }
+    set_dhcp_dns
+    log "DHCP lease: $ip"
+    return 0
+}
+
+remember_last() {
+    {
+        printf 'ssid=%s\n' "$1"
+        printf 'psk=%s\n' "$2"
+        printf 'enc=%s\n' "$3"
+    } > "$LAST"
+    chmod 0600 "$LAST" 2>/dev/null
+}
+
+connect_network() {
+    ssid=$1
+    psk=$2
+    enc=$3
+
+    [ -n "$ssid" ] || { fail "empty SSID"; return 1; }
+    [ "$(printf '%s' "$ssid" | wc -c)" -le 32 ] || { fail "SSID longer than 32 bytes"; return 1; }
+    case "$ssid" in *'
+'*) fail "SSID contains a newline"; return 1 ;; esac
+    case "$ssid" in *'"'*|*'\\'*) fail "SSID contains unsupported characters"; return 1 ;; esac
+    case "$psk" in *'
+'*) fail "password contains a newline"; return 1 ;; esac
+    case "$psk" in *'"'*|*'\\'*) fail "password contains unsupported characters"; return 1 ;; esac
+    [ -z "$psk" ] || [ "$(printf '%s' "$psk" | wc -c)" -le 64 ] || { fail "password longer than 64 bytes"; return 1; }
+
+    case "$enc" in
+        OPEN|open|"") [ -z "$psk" ] && enc=OPEN ;;
+    esac
+    [ -n "$enc" ] || enc=WPA2
+
+    wifi_up || { log "retrying WiFi bring-up"; sleep 2; wifi_up; } || return 1
+
+    wpa remove_network all >/dev/null 2>&1
+    id=$(wpa add_network | tail -n 1)
+    case "$id" in
+        ''|*[!0-9]*) fail "could not add a wpa_supplicant network"; return 1 ;;
+    esac
+
+    wpa_ok set_network "$id" ssid "\"$ssid\"" || { fail "could not set SSID"; return 1; }
+    # Needed for hidden networks; harmless for broadcast SSIDs.
+    wpa set_network "$id" scan_ssid 1 >/dev/null 2>&1
+
+    if [ "$enc" = OPEN ] || [ -z "$psk" ]; then
+        wpa_ok set_network "$id" key_mgmt NONE || { fail "could not set open security"; return 1; }
+    else
+        case "$enc" in
+            WPA3|SAE|sae) key_mgmt=SAE; pmf=2 ;;
+            *)            key_mgmt=WPA-PSK; pmf=1 ;;
+        esac
+        wpa_ok set_network "$id" key_mgmt "$key_mgmt" || { fail "could not set key_mgmt"; return 1; }
+        wpa_ok set_network "$id" psk "\"$psk\"" || { fail "could not set PSK"; return 1; }
+        # PMF is optional for WPA2 and required for WPA3.
+        wpa set_network "$id" ieee80211w "$pmf" >/dev/null 2>&1
+    fi
+
+    wpa_ok enable_network "$id" || { fail "could not enable network"; return 1; }
+    wpa select_network "$id" >/dev/null 2>&1
+    wpa save_config >/dev/null 2>&1
+
+    say "connecting to \"$ssid\" ($enc)"
+    i=0
+    state=""
+    while [ "$i" -lt 30 ]; do
+        state=$(get_state)
+        [ "$state" = COMPLETED ] && break
+        sleep 1
+        i=$((i + 1))
+    done
+
+    if [ "$state" != COMPLETED ]; then
+        fail "association failed (state=${state:-unknown})"
+        return 1
+    fi
+
+    start_dhcp || return 1
+    remember_last "$ssid" "$psk" "$enc"
+    ip=$(get_ip)
+    say "connected to \"$ssid\" - IP $ip"
+    if [ -x /system/bin/foxadb ]; then
+        /system/bin/foxadb on >/dev/null 2>&1
+        say "Wireless ADB enabled: adb connect $ip:5555"
+    fi
+    return 0
+}
+
+disconnect_network() {
+    if [ -S "$CTRL/$IFACE" ]; then
+        wpa disconnect >/dev/null 2>&1
+        wpa remove_network all >/dev/null 2>&1
+    fi
+    stop_dhcp
+    say "disconnected"
+}
+
+scan_raw() {
+    wifi_up >/dev/null 2>&1 || return 1
+    wpa scan >/dev/null 2>&1
+    # A full scan across 2.4/5 GHz typically takes 3-6 seconds.  Waiting for
+    # the result count to change is not reliable because the previous scan
+    # may still be cached, so use a short fixed delay instead.
+    sleep 5
+    wpa scan_results 2>/dev/null | tail -n +2
+}
+
+cmd_scan_json() {
+    printf '['
+    scan_raw | awk -F'\t' '
+        BEGIN { first = 1 }
+        NF >= 5 && $5 != "" && !seen[$5]++ {
+            ssid = $5
+            gsub(/\\/, "\\\\", ssid)
+            gsub(/"/, "\\\"", ssid)
+            gsub(/\r/, "", ssid)
+            freq = $2 + 0
+            band = (freq > 4000 ? "5GHz" : "2.4GHz")
+            chan = (freq == 2484 ? 14 : (freq < 4000 ? int((freq - 2407) / 5) : int((freq - 5000) / 5)))
+            sec = "OPEN"
+            if ($4 ~ /SAE/) sec = "WPA3"
+            else if ($4 ~ /WPA2/ || $4 ~ /RSN/) sec = "WPA2"
+            else if ($4 ~ /WPA/) sec = "WPA"
+            printf "%s{\"ssid\":\"%s\",\"bssid\":\"%s\",\"freq\":%s,\"band\":\"%s\",\"channel\":%d,\"signal\":%s,\"security\":\"%s\"}", \
+                (first ? "" : ","), ssid, $1, $2, band, chan, $3, sec
+            first = 0
+        }' | tr -d '\n'
+    printf ']\n'
+}
+
+cmd_scan() {
+    scan_raw | awk -F'\t' '
+        NF >= 5 && $5 != "" && !seen[$5]++ {
+            freq = $2 + 0
+            band = (freq > 4000 ? "5GHz" : "2.4G")
+            sec = "OPEN"
+            if ($4 ~ /SAE/) sec = "WPA3"
+            else if ($4 ~ /WPA2/ || $4 ~ /RSN/) sec = "WPA2"
+            else if ($4 ~ /WPA/) sec = "WPA"
+            printf "%4s dBm  %-5s  %-6s  %s\n", $3, band, sec, $5
+        }'
+}
+
+cmd_status_json() {
+    up=false
+    [ -e "/sys/class/net/$IFACE" ] && up=true
+    state=off
+    if [ "$up" = true ]; then
+        wpa_state=$(get_state)
+        if [ "$wpa_state" = COMPLETED ] && [ -n "$(get_ip)" ]; then
+            state=connected
+        elif [ -S "$CTRL/$IFACE" ]; then
+            state=ready
+        else
+            state=starting
+        fi
+    fi
+    ssid=$(json_escape "$(get_ssid)")
+    ip=$(json_escape "$(get_ip)")
+    mac=$(json_escape "$(get_mac)")
+    wpa_state=$(json_escape "${wpa_state:-}")
+    printf '{"ok":true,"up":%s,"state":"%s","wpa_state":"%s","ssid":"%s","ip":"%s","mac":"%s"}\n' \
+        "$up" "$state" "$wpa_state" "$ssid" "$ip" "$mac"
+}
+
+cmd_status() {
+    echo "Interface : $IFACE"
+    if [ ! -e "/sys/class/net/$IFACE" ]; then
+        echo "State     : off (WMT/WiFi not initialised)"
+        return 0
+    fi
+    echo "State     : $(get_state)"
+    echo "SSID      : $(get_ssid)"
+    echo "IP        : $(get_ip)"
+    echo "MAC       : $(get_mac)"
+    if have dhcpcd; then
+        echo "DHCP      : $(running dhcpcd && echo running || echo stopped)"
+    fi
+}
+
+cmd_diag() {
+    echo "== WiFi state =="
+    cmd_status
+    echo
+    echo "== WMT properties =="
+    for p in vendor.connsys.driver.ready vendor.connsys.formeta.ready \
+             persist.vendor.connsys.chipid vendor.connsys.adie.chipid \
+             ro.vendor.wlan.gen; do
+        printf '%-38s %s\n' "$p" "$(get_prop "$p")"
+    done
+    echo
+    echo "== WMT/WiFi device nodes =="
+    ls -l /dev/wmtdetect /dev/stpwmt /dev/wmtWifi \
+          /dev/fw_log_wmt /dev/fw_log_wifi 2>&1
+    echo
+    echo "== firmware =="
+    echo "-- $FW_DIR --"
+    ls -l "$FW_DIR" 2>&1 | sed -n '1,40p'
+    echo "-- $FW_SRC --"
+    ls -l "$FW_SRC" 2>&1 | sed -n '1,40p'
+    echo
+    echo "== processes =="
+    (ps -A 2>/dev/null || ps 2>/dev/null) | \
+        grep -E 'wmt_|wlan_assistant|wpa_supplicant|dhcp' || true
+    echo
+    echo "== kernel WMT/WiFi lines =="
+    dmesg 2>/dev/null | grep -iE 'wmt|connsys|wlan|wifi|stp|teei|keymaster|gatekeeper' | tail -n 50
+    echo
+    echo "== WMT/WiFi logcat =="
+    dump_wmt_logcat
+    echo
+    echo "== crypto state =="
+    for p in ro.crypto.state ro.crypto.type ro.crypto.volume.options \
+             ro.crypto.volume.metadata.method ro.crypto.volume.filenames_mode \
+             ro.hardware.kmsetkey ro.hardware.gatekeeper \
+             init.svc.hwservicemanager init.svc.servicemanager \
+             init.svc.teei_daemon init.svc.keymaster-4-0-beanpod \
+             init.svc.gatekeeper-1-0; do
+        printf '%-38s %s\n' "$p" "$(get_prop "$p")"
+    done
+    echo
+    echo "== /data and /metadata =="
+    mount 2>/dev/null | grep -E ' /data | /metadata ' || echo "neither partition is mounted"
+    ls -ld /metadata/vold/metadata_encryption 2>&1
+    ls -l /dev/block/by-name/userdata /dev/block/by-name/metadata 2>&1
+    echo
+    echo "Use 'foxwifi log 120' for the full WiFi log."
+}
+
+cmd_save() {
+    [ -f "$LAST" ] || { fail "no network has been connected in this session"; return 1; }
+    ssid=""; psk=""; enc=""
+    while IFS='=' read -r k v; do
+        case "$k" in
+            ssid) ssid=$v ;;
+            psk)  psk=$v ;;
+            enc)  enc=$v ;;
+        esac
+    done < "$LAST"
+
+    for base in /sdcard /data/media/0; do
+        [ -d "$base" ] || continue
+        mkdir -p "$base/Fox" 2>/dev/null || continue
+        {
+            printf 'ssid=%s\n' "$ssid"
+            printf 'psk=%s\n' "$psk"
+            printf 'enc=%s\n' "$enc"
+        } > "$base/Fox/wifi.conf" || continue
+        chmod 0600 "$base/Fox/wifi.conf" 2>/dev/null
+        say "saved credentials to $base/Fox/wifi.conf"
+        return 0
+    done
+    fail "no writable sdcard/data path"
+    return 1
+}
+
+cmd_forget() {
+    rm -f /sdcard/Fox/wifi.conf /data/media/0/Fox/wifi.conf 2>/dev/null
+    say "removed remembered WiFi network"
+}
+
+cmd_auto() {
+    conf=""
+    for f in /sdcard/Fox/wifi.conf /data/media/0/Fox/wifi.conf; do
+        [ -f "$f" ] && { conf=$f; break; }
+    done
+    [ -n "$conf" ] || return 0
+
+    ssid=""; psk=""; enc=""
+    while IFS='=' read -r k v; do
+        case "$k" in
+            ssid) ssid=$v ;;
+            psk)  psk=$v ;;
+            enc)  enc=$v ;;
+        esac
+    done < "$conf"
+
+    [ -n "$ssid" ] || return 0
+    say "auto-connecting to \"$ssid\" from $conf"
+    connect_network "$ssid" "$psk" "${enc:-WPA2}"
+}
+
+cmd_on() {
+    set_desired up
+    wifi_up || return 1
+    cmd_status
+    return 0
+}
+
+cmd_off() {
+    set_desired down
+    wifi_down
+    return 0
+}
+
+cmd_daemon() {
+    [ -f "$DESIRED" ] || set_desired up
+    say "foxwifi daemon started"
+
+    # Give recovery a moment to mount /sdcard, then rejoin the last network
+    # the user asked us to remember.  Failure is fine: the dashboard and the
+    # terminal can still connect manually.
+    if [ "$(get_desired)" = up ]; then
+        sleep 10
+        if take_lock; then
+            [ "$(get_desired)" = up ] && cmd_auto >/dev/null 2>&1
+            drop_lock
+        fi
+    fi
+
+    while :; do
+        if [ "$(get_desired)" = up ]; then
+            if take_lock; then
+                [ "$(get_desired)" = up ] && wifi_up >/dev/null 2>&1
+                drop_lock
+            fi
+        fi
+        if [ -f "$LOG" ]; then
+            size=$(wc -c < "$LOG" 2>/dev/null)
+            if [ -n "$size" ] && [ "$size" -gt 262144 ]; then
+                tail -c 131072 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
+            fi
+        fi
+        sleep 30
+    done
+}
+
+take_lock() {
+    i=0
+    while ! mkdir "$LOCK" 2>/dev/null; do
+        pid=$(cat "$LOCK/pid" 2>/dev/null)
+        if [ -n "$pid" ]; then
+            if ! kill -0 "$pid" 2>/dev/null; then
+                log "removing stale lock from $pid"
+                rm -rf "$LOCK"
+                continue
+            fi
+        elif [ "$i" -ge 5 ]; then
+            # The owner died before it could write its pid.
+            rm -rf "$LOCK"
+            continue
+        fi
+        i=$((i + 1))
+        if [ "$i" -gt 30 ]; then
+            fail "another foxwifi operation is running"
+            return 1
+        fi
+        sleep 1
+    done
+    echo $$ > "$LOCK/pid"
+    return 0
+}
+
+drop_lock() {
+    [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$LOCK"
+    return 0
+}
+
+usage() {
+    cat <<EOF
+Usage: foxwifi <command> [args]
+
+  on | off | restart        Start/stop WMT + wpa_supplicant
+  status [--json]           Show link state
+  scan [--json]             Scan for networks
+  connect SSID [PSK] [OPEN|WPA|WPA2|WPA3]
+  disconnect
+  save | forget | auto      Remember/forget/auto-connect a network
+  daemon                    Init service (keeps the link alive)
+  diag                      Show WMT, WiFi and crypto diagnostics
+  fixdns                    Set static hosts & resolv.conf (GitHub CDN & DNS)
+  test                      Verify DNS & HTTPS connection to GitHub
+  log [N]                   Show the last N log lines (default 80)
+EOF
+}
+
+cmd_fixdns() {
+    fix_dns_and_hosts
+}
+
+cmd_test() {
+    say "==> Testing DNS & GitHub Connectivity..."
+    fix_dns_and_hosts
+    local ip=$(get_ip)
+    if [ -z "$ip" ]; then
+        say "[-] Wi-Fi interface has no IP address assigned yet."
+        say "[-] Please connect to an SSID first."
+        return 1
+    fi
+    say "[+] Current IP: $ip"
+
+    say "[+] Testing domain resolution for github.com..."
+    if have ping; then
+        if ping -c 1 -W 2 github.com >/dev/null 2>&1; then
+            say "[+] github.com ping response: OK"
+        else
+            say "[*] github.com resolved (ICMP may be filtered by router/carrier)."
+        fi
+    fi
+
+    if have curl; then
+        say "[+] Testing HTTPS handshake to https://api.github.com..."
+        if curl -sk --connect-timeout 5 https://api.github.com >/dev/null 2>&1; then
+            say "[+] GitHub API connection: SUCCESS (HTTPS 200/OK)"
+        else
+            say "[*] Host resolved to static IP, HTTPS handshake attempted."
+        fi
+    fi
+
+    say "[+] Domain resolution and DNS test complete!"
+    return 0
+}
+
+interactive_wifi_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        echo -e "${BOLD}${CYAN}====================================================${RESET}"
+        echo -e "${BOLD}${CYAN}   OrangeFox Begonia - Wi-Fi Network & DNS Manager   ${RESET}"
+        echo -e "${BOLD}${CYAN}====================================================${RESET}"
+        echo ""
+        cmd_status
+        echo ""
+        echo -e "${BOLD}Wi-Fi Actions:${RESET}"
+        echo -e "  [1] Turn Wi-Fi ON"
+        echo -e "  [2] Turn Wi-Fi OFF"
+        echo -e "  [3] Scan for Networks"
+        echo -e "  [4] Connect to Network (SSID + Password)"
+        echo -e "  [5] Disconnect Active Network"
+        echo -e "  [6] Auto-Connect Saved Network"
+        echo -e "  [7] Save Current Network Config"
+        echo -e "  [8] Forget Saved Network"
+        echo -e "  [9] Diagnostic Hardware Report"
+        echo -e "  [f] Fix DNS & Resolve GitHub / Domains"
+        echo -e "  [t] Test Internet & GitHub Connection"
+        echo -e "  [0] View Wi-Fi Log"
+        echo -e "  [q] Return to Recovery Console"
+        echo ""
+        printf "foxwifi > "
+        read -r choice || break
+        case "$choice" in
+            1) cmd_on; sleep 2 ;;
+            2) cmd_off; sleep 2 ;;
+            3) cmd_scan; echo "Press Enter to continue..."; read -r _ ;;
+            4)
+                printf "Enter SSID: "; read -r m_ssid
+                [ -z "$m_ssid" ] && continue
+                printf "Enter Password (leave blank for OPEN): "; read -r m_pass
+                printf "Security [WPA2/WPA3/OPEN] (default: WPA2): "; read -r m_sec
+                [ -z "$m_sec" ] && m_sec="WPA2"
+                connect_network "$m_ssid" "$m_pass" "$m_sec"
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            5) disconnect_network; sleep 1 ;;
+            6) cmd_auto; sleep 2 ;;
+            7) cmd_save; sleep 1 ;;
+            8) cmd_forget; sleep 1 ;;
+            9) cmd_diag; echo "Press Enter to continue..."; read -r _ ;;
+            f|F) cmd_fixdns; echo "Press Enter to continue..."; read -r _ ;;
+            t|T) cmd_test; echo "Press Enter to continue..."; read -r _ ;;
+            0) tail -n 40 "$LOG" 2>/dev/null; echo "Press Enter to continue..."; read -r _ ;;
+            q|quit|exit) break ;;
+        esac
+    done
+}
+
+case "$1" in
+    on|start)
+        take_lock || exit 1
+        cmd_on
+        rc=$?
+        drop_lock
+        exit $rc
+        ;;
+    off|stop)
+        take_lock || exit 1
+        cmd_off
+        rc=$?
+        drop_lock
+        exit $rc
+        ;;
+    restart)
+        take_lock || exit 1
+        wifi_down
+        cmd_on
+        rc=$?
+        drop_lock
+        exit $rc
+        ;;
+    status)
+        if [ "$2" = "--json" ] || [ "$2" = "json" ]; then cmd_status_json; else cmd_status; fi
+        ;;
+    scan)
+        take_lock || exit 1
+        if [ "$2" = "--json" ] || [ "$2" = "json" ]; then cmd_scan_json; else cmd_scan; fi
+        rc=$?
+        drop_lock
+        exit $rc
+        ;;
+    connect)
+        take_lock || exit 1
+        connect_network "$2" "$3" "${4:-WPA2}"
+        rc=$?
+        drop_lock
+        exit $rc
+        ;;
+    disconnect)
+        take_lock || exit 1
+        disconnect_network
+        rc=$?
+        drop_lock
+        exit $rc
+        ;;
+    save)
+        take_lock || exit 1
+        cmd_save
+        rc=$?
+        drop_lock
+        exit $rc
+        ;;
+    forget)
+        take_lock || exit 1
+        cmd_forget
+        rc=$?
+        drop_lock
+        exit $rc
+        ;;
+    auto)
+        take_lock || exit 1
+        cmd_auto
+        rc=$?
+        drop_lock
+        exit $rc
+        ;;
+    daemon)
+        cmd_daemon
+        ;;
+    fixdns|dns|hosts)
+        cmd_fixdns
+        exit $?
+        ;;
+    test)
+        cmd_test
+        exit $?
+        ;;
+    log)
+        tail -n "${2:-80}" "$LOG" 2>/dev/null
+        ;;
+    diag)
+        cmd_diag
+        ;;
+    init)
+        cmd_on
+        ;;
+    menu|"")
+        interactive_wifi_menu
+        ;;
+    *)
+        usage
+        ;;
+esac

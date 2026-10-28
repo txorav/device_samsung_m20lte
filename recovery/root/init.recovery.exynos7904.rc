@@ -1,3 +1,13 @@
+on early-init
+    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu4/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu5/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu6/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu7/cpufreq/scaling_governor performance
+
 on init
     setprop sys.usb.configfs 1
 
@@ -16,6 +26,12 @@ on fs
     symlink /dev/block/bootdevice/by-name/UP_PARAM /dev/block/bootdevice/by-name/up_param
     symlink /dev/block/bootdevice/by-name/DTBO /dev/block/bootdevice/by-name/dtbo
     symlink /dev/block/bootdevice/by-name/PRODUCT /dev/block/bootdevice/by-name/product
+
+    # Pre-create /sdcard/Fox/FoxFiles to eliminate "OrangeFox can't access its files" hint
+    mkdir /data/media 0775 media_rw media_rw
+    mkdir /data/media/0 0775 media_rw media_rw
+    mkdir /data/media/0/Fox 0775 media_rw media_rw
+    mkdir /data/media/0/Fox/FoxFiles 0775 media_rw media_rw
 
 on boot
     # Flashlight (S2MU004 Camera Flash)
