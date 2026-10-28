@@ -38,12 +38,16 @@ bool M20LteHal::initialize() {
 
 PartitionTargetMode M20LteHal::detect_partition_mode() {
     // Check if SUPER partition exists in GPT
-    if (access("/dev/block/platform/13500000.dwmmc0/by-name/SUPER", F_OK) == 0) {
+    if (access("/dev/block/platform/13500000.dwmmc0/by-name/SUPER", F_OK) == 0 ||
+        access("/dev/block/bootdevice/by-name/SUPER", F_OK) == 0) {
         return PartitionTargetMode::UNIFIED_SUPER_GPT;
     }
 
     // Check for Retrofit Dynamic partition metadata in SYSTEM (LpMetadata magic: 0x616C4467)
     int fd = open("/dev/block/platform/13500000.dwmmc0/by-name/SYSTEM", O_RDONLY);
+    if (fd < 0) {
+        fd = open("/dev/block/bootdevice/by-name/SYSTEM", O_RDONLY);
+    }
     if (fd >= 0) {
         uint32_t magic = 0;
         lseek(fd, 0x1000, SEEK_SET); // LpMetadata header offset
@@ -61,7 +65,8 @@ PartitionTargetMode M20LteHal::detect_partition_mode() {
 
 bool M20LteHal::switch_to_dynamic_mode() {
     // Map logical partitions via device-mapper / fastbootd
-    system("dmctl create system linear /dev/block/platform/13500000.dwmmc0/by-name/SYSTEM 0 2097152 2>/dev/null");
+    system("dmctl create system linear /dev/block/bootdevice/by-name/SYSTEM 0 2097152 2>/dev/null || "
+           "dmctl create system linear /dev/block/platform/13500000.dwmmc0/by-name/SYSTEM 0 2097152 2>/dev/null");
     return true;
 }
 
@@ -95,6 +100,23 @@ bool M20LteHal::set_flashlight(bool enable, int level) {
         raw_val = 1000 + level;
     }
 
+    if (flashlight_node_.empty()) {
+        const char* nodes[] = {
+            "/sys/class/camera/flash/rear_flash",
+            "/sys/devices/virtual/camera/flash/rear_flash",
+            "/sys/class/leds/flashlight/brightness"
+        };
+        for (const char* n : nodes) {
+            if (access(n, W_OK) == 0) {
+                flashlight_node_ = n;
+                break;
+            }
+        }
+        if (flashlight_node_.empty()) {
+            flashlight_node_ = "/sys/class/camera/flash/rear_flash";
+        }
+    }
+
     std::ofstream f(flashlight_node_);
     if (!f.is_open()) return false;
     f << raw_val << "\n";
@@ -103,6 +125,7 @@ bool M20LteHal::set_flashlight(bool enable, int level) {
     fl_state_.enabled = enable;
     fl_state_.level = level;
     fl_state_.raw_value = raw_val;
+    fl_state_.active_node = flashlight_node_;
     return true;
 }
 

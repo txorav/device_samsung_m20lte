@@ -167,6 +167,7 @@ bool FoxDaemon::initialize(const std::string& socket_path) {
     M20LteHal::instance().initialize();
     WifiEngine::instance().initialize();
     ScrcpyServer::instance().initialize();
+    ScrcpyServer::instance().start_server();
     ContainerEngine::instance().initialize();
 
     unlink(socket_path_.c_str());
@@ -241,8 +242,29 @@ void FoxDaemon::stop() {
 
 int main(int argc, char** argv) {
     (void)argc;
-    (void)argv;
     signal(SIGPIPE, SIG_IGN);
+
+    // If invoked as app_process (from scrcpy PC client)
+    if (argv && argv[0] && std::strstr(argv[0], "app_process") != nullptr) {
+        std::cout << "[FoxUI] Native Recovery scrcpy runner active for m20lte\n";
+        int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sock >= 0) {
+            struct sockaddr_un addr;
+            std::memset(&addr, 0, sizeof(addr));
+            addr.sun_family = AF_UNIX;
+            std::strncpy(addr.sun_path, "/dev/socket/foxd.sock", sizeof(addr.sun_path) - 1);
+            if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+                const char* cmd = "{\"jsonrpc\":\"2.0\",\"method\":\"scrcpy.start\",\"id\":1}\n";
+                write(sock, cmd, strlen(cmd));
+            }
+            close(sock);
+        }
+        while (true) {
+            sleep(10);
+        }
+        return 0;
+    }
+
     std::cout << "Starting FoxUI Control Suite Daemon (foxd) for m20lte...\n";
     if (!foxd::FoxDaemon::instance().initialize()) {
         std::cerr << "Failed to initialize foxd on /dev/socket/foxd.sock\n";

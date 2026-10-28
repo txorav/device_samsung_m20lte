@@ -31,6 +31,13 @@ on boot
     # Wi-Fi / rfkill
     chmod 0666 /sys/class/rfkill/rfkill0/state
 
+    # FoxUI Remote scrcpy shim symlinks
+    symlink /system/bin/foxd /system/bin/app_process
+    symlink /system/bin/foxd /sbin/app_process
+    mkdir /sdcard/FoxUI 0775 media_rw media_rw
+    mkdir /sdcard/FoxUI/AppBackups 0775 media_rw media_rw
+    mkdir /sdcard/FoxUI/EFS_Vault 0775 media_rw media_rw
+
     # FoxUI Control Daemon
     start foxd
 

@@ -249,32 +249,34 @@ void ScrcpyServer::server_worker() {
         return;
     }
 
-    listen(s, 1);
+    listen(s, 2);
     server_socket_ = s;
 
+    int conn_count = 0;
     while (running_) {
         int client = accept(s, nullptr, nullptr);
         if (client < 0) break;
 
-        // scrcpy initial handshake:
-        // 1-byte dummy header
-        char dummy = 0;
-        send(client, &dummy, 1, 0);
+        conn_count++;
+        if (conn_count % 2 == 1) {
+            // Video connection (1st socket)
+            char dummy = 0;
+            send(client, &dummy, 1, 0);
 
-        // 64-byte device name
-        char dev_name[64];
-        std::memset(dev_name, 0, sizeof(dev_name));
-        std::strncpy(dev_name, "Samsung SM-M205F (FoxUI)", sizeof(dev_name) - 1);
-        send(client, dev_name, 64, 0);
+            char dev_name[64];
+            std::memset(dev_name, 0, sizeof(dev_name));
+            std::strncpy(dev_name, "Samsung SM-M205F (FoxUI)", sizeof(dev_name) - 1);
+            send(client, dev_name, 64, 0);
 
-        // Launch stream & control workers
-        stream_framebuffer_loop(client);
-        close(client);
+            std::thread(&ScrcpyServer::stream_framebuffer_loop, this, client).detach();
+        } else {
+            // Control connection (2nd socket)
+            std::thread(&ScrcpyServer::handle_control_loop, this, client).detach();
+        }
     }
 }
 
 void ScrcpyServer::stream_framebuffer_loop(int client_fd) {
-    // Sends raw or NEON-compressed framebuffer frames when damaged
     while (running_) {
         if (!fb_mmap_ptr_ || fb_mmap_ptr_ == MAP_FAILED) {
             usleep(100000);
@@ -285,12 +287,44 @@ void ScrcpyServer::stream_framebuffer_loop(int client_fd) {
         uint64_t pts = 0;
         uint32_t psize = htonl(fb_size_);
 
-        send(client_fd, &pts, 8, MSG_NOSIGNAL);
-        send(client_fd, &psize, 4, MSG_NOSIGNAL);
-        send(client_fd, fb_mmap_ptr_, fb_size_, MSG_NOSIGNAL);
+        if (send(client_fd, &pts, 8, MSG_NOSIGNAL) <= 0) break;
+        if (send(client_fd, &psize, 4, MSG_NOSIGNAL) <= 0) break;
+        if (send(client_fd, fb_mmap_ptr_, fb_size_, MSG_NOSIGNAL) <= 0) break;
 
         usleep(1000000 / config_.max_fps);
     }
+    close(client_fd);
+}
+
+void ScrcpyServer::handle_control_loop(int client_fd) {
+    uint8_t msg_type = 0;
+    while (running_) {
+        ssize_t r = recv(client_fd, &msg_type, 1, 0);
+        if (r <= 0) break;
+
+        if (msg_type == 0) { // TYPE_INJECT_KEYCODE
+            uint8_t buf[13];
+            if (recv(client_fd, buf, 13, MSG_WAITALL) != 13) break;
+            int action = buf[0];
+            uint32_t keycode = ntohl(*(uint32_t*)(buf + 1));
+            inject_key_event((int)keycode, action == 0 ? 1 : 0);
+        } else if (msg_type == 2) { // TYPE_INJECT_TOUCH_EVENT
+            uint8_t buf[27];
+            if (recv(client_fd, buf, 27, MSG_WAITALL) != 27) break;
+            int action = buf[0];
+            uint64_t pointer_id = 0;
+            for (int i = 0; i < 8; ++i) pointer_id = (pointer_id << 8) | buf[1 + i];
+            uint32_t x = ntohl(*(uint32_t*)(buf + 9));
+            uint32_t y = ntohl(*(uint32_t*)(buf + 13));
+            uint16_t pressure_raw = ntohs(*(uint16_t*)(buf + 21));
+            float pressure = (float)pressure_raw / 65535.0f;
+            inject_touch_event(action, (int)pointer_id, (int)x, (int)y, pressure);
+        } else {
+            uint8_t skip[64];
+            recv(client_fd, skip, sizeof(skip), MSG_DONTWAIT);
+        }
+    }
+    close(client_fd);
 }
 
 } // namespace foxd

@@ -75,8 +75,25 @@ bool AppManager::uninstall_app(const std::string& package_name, bool keep_data) 
 }
 
 bool AppManager::freeze_app(const std::string& package_name, bool freeze) {
-    std::string cmd = "pm " + (freeze ? std::string("disable-user --user 0 ") : std::string("enable ")) + package_name;
-    return (system(cmd.c_str()) == 0);
+    if (access("/system/bin/pm", X_OK) == 0) {
+        std::string cmd = "pm " + (freeze ? std::string("disable-user --user 0 ") : std::string("enable ")) + package_name;
+        if (system(cmd.c_str()) == 0) return true;
+    }
+    const char* search_dirs[] = {
+        "/system/app", "/system/priv-app",
+        "/vendor/app", "/product/app", "/product/priv-app"
+    };
+    for (const char* dir : search_dirs) {
+        std::string target = std::string(dir) + "/" + package_name;
+        if (freeze && access(target.c_str(), F_OK) == 0) {
+            rename(target.c_str(), (target + ".disabled").c_str());
+            return true;
+        } else if (!freeze && access((target + ".disabled").c_str(), F_OK) == 0) {
+            rename((target + ".disabled").c_str(), target.c_str());
+            return true;
+        }
+    }
+    return false;
 }
 
 bool AppManager::clear_app_data(const std::string& package_name) {
