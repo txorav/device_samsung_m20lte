@@ -228,18 +228,29 @@ jobs:
         run: |
           OUT_DIR="$SRC_DIR/out/target/product/m20lte"
           if [ -f "$OUT_DIR/recovery.img" ]; then
-            echo "Packaging Odin tar archives..."
+            echo "Packaging Odin tar archives with SEANDROIDENFORCE and disabled vbmeta..."
             cd "$OUT_DIR"
+            # 1. Append SEANDROIDENFORCE magic trailer required by Samsung Exynos sboot
+            if ! tail -c 16 recovery.img | grep -q "SEANDROIDENFORCE"; then
+              echo -n "SEANDROIDENFORCE" >> recovery.img
+            fi
+
+            # 2. Package pure recovery.tar (Galaxy M20 has NO vbmeta partition in its PIT table)
             tar -H ustar -c recovery.img > recovery.tar
             cp -f recovery.tar recovery.tar.md5
             md5sum -t recovery.tar.md5 >> recovery.tar.md5
+
+            # 3. Update recovery.img inside any flashable zip archives so direct recovery zip flashing works
+            find "$OUT_DIR" -maxdepth 1 -name "*.zip" | while read -r z; do
+              echo "Updating recovery.img with SEANDROIDENFORCE in $z..."
+              zip -u "$z" recovery.img || true
+              md5sum "$z" | awk '{print $1}' > "${z}.md5"
+            done
+
             md5sum recovery.img > recovery.img.md5
             sha256sum recovery.img > recovery.img.sha256
             cd "$GITHUB_WORKSPACE"
           fi
-          find "$OUT_DIR" -maxdepth 1 -name "*.zip" | while read -r z; do
-            md5sum "$z" | awk '{print $1}' > "${z}.md5"
-          done
           ls -lh "$OUT_DIR"
 
       - name: Show ccache stats
