@@ -33,6 +33,7 @@
 		<xml name="/twres/pages/files.xml"/>
 		<xml name="/twres/pages/rmmanager.xml"/>
 		<xml name="/twres/pages/advanced.xml"/>
+		<xml name="/twres/pages/foxui.xml"/>
 		<xml name="/twres/pages/reboot.xml"/>
 		<xml name="/twres/pages/settings.xml"/>
 		<xml name="/twres/pages/universal.xml"/>
