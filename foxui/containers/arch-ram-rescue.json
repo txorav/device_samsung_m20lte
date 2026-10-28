@@ -1,0 +1,56 @@
+{
+  "schema_version": "3.0",
+  "container_id": "arch-ram-rescue",
+  "display_name": "Arch Linux ARM (RAM Rescue + Partition Access)",
+  "distro": "archlinux-aarch64",
+  "base_image_path": "/external_sd/FoxUI/images/archlinux-arm64.sqfs",
+  "storage_config": {
+    "persistence_mode": "EPHEMERAL_RAM",
+    "copy_base_sqfs_to_ram": true,
+    "ram_upperdir_limit_mb": 1536,
+    "zram_swap_pool_mb": 2048,
+    "zram_algorithm": "zstd"
+  },
+  "partition_mounts": [
+    {
+      "source_type": "PARTITION_BY_NAME",
+      "source": "USERDATA",
+      "target": "/mnt/data",
+      "fs_type": "auto",
+      "writable": true
+    },
+    {
+      "source_type": "LOGICAL_OR_PHYSICAL",
+      "source": "system",
+      "target": "/mnt/system",
+      "fs_type": "auto",
+      "writable": false
+    },
+    {
+      "source_type": "LOGICAL_OR_PHYSICAL",
+      "source": "vendor",
+      "target": "/mnt/vendor",
+      "fs_type": "auto",
+      "writable": false
+    },
+    {
+      "source_type": "PARTITION_BY_NAME",
+      "source": "EFS",
+      "target": "/mnt/efs",
+      "fs_type": "ext4",
+      "writable": false
+    },
+    {
+      "source_type": "DEV_PASSTHROUGH",
+      "source": "/dev/block",
+      "target": "/dev/block",
+      "writable": true
+    }
+  ],
+  "runtime_config": {
+    "hostname": "m20lte-arch",
+    "init_command": ["/bin/bash", "-l"],
+    "network_mode": "HOST",
+    "ssh_port": 2222
+  }
+}

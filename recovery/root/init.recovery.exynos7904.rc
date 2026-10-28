@@ -10,3 +10,34 @@ on fs
     symlink /dev/block/bootdevice/by-name/SYSTEM /dev/block/bootdevice/by-name/system
     symlink /dev/block/bootdevice/by-name/VENDOR /dev/block/bootdevice/by-name/vendor
     symlink /dev/block/bootdevice/by-name/CACHE /dev/block/bootdevice/by-name/cache
+    symlink /dev/block/bootdevice/by-name/RADIO /dev/block/bootdevice/by-name/modem
+    symlink /dev/block/bootdevice/by-name/EFS /dev/block/bootdevice/by-name/efs
+    symlink /dev/block/bootdevice/by-name/CPEFS /dev/block/bootdevice/by-name/cpefs
+    symlink /dev/block/bootdevice/by-name/UP_PARAM /dev/block/bootdevice/by-name/up_param
+    symlink /dev/block/bootdevice/by-name/DTBO /dev/block/bootdevice/by-name/dtbo
+    symlink /dev/block/bootdevice/by-name/VBMETA /dev/block/bootdevice/by-name/vbmeta
+    symlink /dev/block/bootdevice/by-name/PRODUCT /dev/block/bootdevice/by-name/product
+
+on boot
+    # Flashlight (S2MU004 Camera Flash)
+    chmod 0666 /sys/class/camera/flash/rear_flash
+    chmod 0666 /sys/devices/virtual/camera/flash/rear_flash
+    chmod 0666 /sys/class/leds/flashlight/brightness
+
+    # Virtual Input & Graphics (scrcpy & container input)
+    chmod 0666 /dev/uinput
+    chmod 0666 /dev/graphics/fb0
+
+    # Wi-Fi / rfkill
+    chmod 0666 /sys/class/rfkill/rfkill0/state
+
+    # FoxUI Control Daemon
+    start foxd
+
+service foxd /system/bin/foxd
+    class main
+    user root
+    group root system
+    socket foxd stream 0666 root system
+    seclabel u:r:recovery:s0
+    onrestart restart foxd

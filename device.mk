@@ -21,7 +21,8 @@ TW_INCLUDE_FASTBOOTD := true
 
 PRODUCT_PACKAGES += \
 	android.hardware.fastboot@1.1-impl-mock \
-	fastbootd
+	fastbootd \
+	foxd
 
 PRODUCT_PRODUCT_PROPERTIES += \
 	ro.fastbootd.available=true
