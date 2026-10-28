@@ -1,0 +1,4 @@
+#!/system/bin/sh
+# Native Recovery scrcpy runner shim for foxd
+echo "[foxd] Native Recovery scrcpy started"
+while true; do sleep 3600; done
