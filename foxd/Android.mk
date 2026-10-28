@@ -19,7 +19,8 @@ LOCAL_SRC_FILES := \
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/include
 
-LOCAL_CFLAGS := -Wall -Wextra -Wno-unused-parameter -std=c++17
+LOCAL_CFLAGS := -Wall -Wextra -Wno-unused-parameter
+LOCAL_CPPFLAGS := -std=c++17 -Wall -Wextra -Wno-unused-parameter
 LOCAL_SHARED_LIBRARIES := libcutils liblog
 
 include $(BUILD_EXECUTABLE)

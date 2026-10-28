@@ -26,7 +26,7 @@ FoxDaemon::~FoxDaemon() {
 
 void FoxDaemon::register_rpc_handlers() {
     // 1. System status
-    dispatcher_.register_method("m20lte.system.getStatus", [this](const std::string&) -> std::string {
+    dispatcher_.register_method("m20lte.system.getStatus", [](const std::string&) -> std::string {
         auto part_mode = M20LteHal::instance().detect_partition_mode();
         std::string pmode_str = (part_mode == PartitionTargetMode::RETROFIT_DYNAMIC) ? "retrofit_dynamic" :
                                (part_mode == PartitionTargetMode::UNIFIED_SUPER_GPT) ? "unified_super_gpt" : "non_dynamic_physical";
@@ -87,7 +87,7 @@ void FoxDaemon::register_rpc_handlers() {
         int lvl = 5;
         auto p = params.find("\"level\":");
         if (p != std::string::npos) {
-            try { lvl = std::stoi(params.substr(p + 8)); } catch(...) {}
+            lvl = atoi(params.c_str() + p + 8);
         }
         bool ok = M20LteHal::instance().set_flashlight(enable, lvl);
         return "{\"success\":" + json_bool(ok) + "}";
@@ -108,7 +108,7 @@ void FoxDaemon::register_rpc_handlers() {
         int port = 5555;
         auto p = params.find("\"port\":");
         if (p != std::string::npos) {
-            try { port = std::stoi(params.substr(p + 7)); } catch(...) {}
+            port = atoi(params.c_str() + p + 7);
         }
         bool ok = ScrcpyServer::instance().enable_wireless_adb(port);
         return "{\"success\":" + json_bool(ok) + ",\"port\":" + std::to_string(port) + "}";
@@ -240,6 +240,8 @@ void FoxDaemon::stop() {
 } // namespace foxd
 
 int main(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
     signal(SIGPIPE, SIG_IGN);
     std::cout << "Starting FoxUI Control Suite Daemon (foxd) for m20lte...\n";
     if (!foxd::FoxDaemon::instance().initialize()) {

@@ -141,22 +141,13 @@ std::string JsonRpcDispatcher::dispatch(const std::string& raw_request) {
         return resp.to_string();
     }
 
-    try {
-        std::string result = it->second(req.params_raw);
-        if (req.is_notification) return "";
-        JsonRpcResponse resp;
-        resp.id = req.id;
-        resp.is_error = false;
-        resp.result_json = result.empty() ? "{}" : result;
-        return resp.to_string();
-    } catch (const std::exception& e) {
-        if (req.is_notification) return "";
-        JsonRpcResponse resp;
-        resp.id = req.id;
-        resp.is_error = true;
-        resp.error_json = "{\"code\":-32603,\"message\":\"" + json_escape(e.what()) + "\"}";
-        return resp.to_string();
-    }
+    std::string result = it->second(req.params_raw);
+    if (req.is_notification) return "";
+    JsonRpcResponse resp;
+    resp.id = req.id;
+    resp.is_error = false;
+    resp.result_json = result.empty() ? "{}" : result;
+    return resp.to_string();
 }
 
 std::string JsonRpcDispatcher::create_notification(const std::string& method, const std::string& params_json) {

@@ -202,10 +202,11 @@ std::vector<WifiScanResult> WifiEngine::trigger_scan_and_get_results() {
 
 bool WifiEngine::connect_network(const std::string& ssid, const std::string& psk, const std::string& key_mgmt) {
     std::string id_str = send_wpa_cmd("ADD_NETWORK");
-    int net_id = -1;
-    try {
-        net_id = std::stoi(id_str);
-    } catch (...) {
+    if (id_str.empty() || id_str.find("FAIL") != std::string::npos) {
+        return false;
+    }
+    int net_id = atoi(id_str.c_str());
+    if (net_id < 0 && id_str != "0") {
         return false;
     }
 

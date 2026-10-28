@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <cstdint>
+#include <arpa/inet.h>
 
 namespace foxd {
 

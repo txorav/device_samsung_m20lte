@@ -12,7 +12,13 @@
 #include <linux/fb.h>
 #include <linux/uinput.h>
 #include <linux/input.h>
+#if defined(__ANDROID__)
 #include <sys/system_properties.h>
+#else
+#define PROP_VALUE_MAX 92
+static inline int __system_property_set(const char*, const char*) { return 0; }
+static inline int __system_property_get(const char*, char* out) { if (out) out[0] = 0; return 0; }
+#endif
 
 namespace foxd {
 
