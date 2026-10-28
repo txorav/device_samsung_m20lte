@@ -22,10 +22,6 @@
 					<icon res="partitions"/>
 					<action function="page">part_manage</action>
 				</listitem>
-				<listitem name="Wi-Fi Manager">
-					<icon res="devices"/>
-					<action function="page">wifi_manager</action>
-				</listitem>
 				<listitem name="{@adb_sideload_btn}">
 					<icon res="devices"/>
 					<action function="set">fox_adb=0</action>
