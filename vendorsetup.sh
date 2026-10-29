@@ -141,6 +141,22 @@ if [ "$1" = "$FDEVICE" -o "$AERA_BUILD_DEVICE" = "$FDEVICE" -o "$FOX_BUILD_DEVIC
 	export OF_NO_SAMSUNG_SPECIAL=0
 	export BOARD_HAS_DOWNLOAD_MODE=true
 
+	# BuildBuddy RBE (Remote Build Execution & Cache)
+	export BUILDBUDDY_API_KEY="${BUILDBUDDY_API_KEY:-d5Z9d6ry3bwzvdX4AVVc}"
+	if [ -n "$BUILDBUDDY_API_KEY" ]; then
+		export USE_RBE="true"
+		export RBE_service="remote.buildbuddy.io:443"
+		export RBE_remote_headers="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
+		export RBE_use_rpc_credentials="false"
+		export RBE_CXX_EXEC_STRATEGY="remote_local_fallback"
+		export RBE_JAVAC_EXEC_STRATEGY="remote_local_fallback"
+		export RBE_R8_EXEC_STRATEGY="remote_local_fallback"
+		export RBE_D8_EXEC_STRATEGY="remote_local_fallback"
+		if [ -d "$ANDROID_BUILD_TOP/prebuilts/remoteexecution-client/latest" ]; then
+			export RBE_DIR="$ANDROID_BUILD_TOP/prebuilts/remoteexecution-client/latest"
+		fi
+	fi
+
 	# Magisk setup
 	function download_magisk(){
 		local DEST=$1
