@@ -42,10 +42,6 @@
 
 			<listbox style="group_list">
 				<placement x="0" y="%row5_1_y%" w="%screen_w%" h="%adv_additions_h%"/>
-				<listitem name="FoxUI System Suite">
-					<icon res="wand_shine"/>
-					<action function="page">foxui_dashboard</action>
-				</listitem>
 				<listitem name="{@reflash_twrp}">
 					<icon res="wrench"/>
 					<condition var1="fox_branch" op="&gt;=" var2="11"/>
@@ -659,10 +655,6 @@
 					<action function="set">tw_complete_text1={@fix_recovery_loop_complete}</action>
 					<action function="set">tw_slider_text={@swipe_to_confirm}</action>
 					<action function="page">confirm_action</action>
-				</listitem>
-				<listitem name="FoxUI System Suite">
-					<icon res="wand_shine"/>
-					<action function="page">foxui_dashboard</action>
 				</listitem>
 				<listitem name="{@custom_settings}">
 					<condition var1="fileexists" var2="/sbin/maintainer.xml"/>

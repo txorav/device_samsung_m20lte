@@ -21,17 +21,10 @@ TW_INCLUDE_FASTBOOTD := true
 
 PRODUCT_PACKAGES += \
 	android.hardware.fastboot@1.1-impl-mock \
-	fastbootd \
-	foxd
+	fastbootd
 
 PRODUCT_PRODUCT_PROPERTIES += \
 	ro.fastbootd.available=true
-
-PRODUCT_COPY_FILES += \
-	$(LOCAL_PATH)/foxui/containers/alpine-rescue.json:$(TARGET_RECOVERY_ROOT_OUT)/system/etc/foxui/containers/alpine-rescue.json \
-	$(LOCAL_PATH)/foxui/containers/arch-ram-rescue.json:$(TARGET_RECOVERY_ROOT_OUT)/system/etc/foxui/containers/arch-ram-rescue.json \
-	$(LOCAL_PATH)/foxui/containers/debian-rescue.json:$(TARGET_RECOVERY_ROOT_OUT)/system/etc/foxui/containers/debian-rescue.json \
-	$(LOCAL_PATH)/foxui/debloat/m20lte-oneui-safe-debloat.json:$(TARGET_RECOVERY_ROOT_OUT)/system/etc/foxui/debloat/m20lte-oneui-safe-debloat.json
 
 PRODUCT_PROPERTY_OVERRIDES += \
 	of_hide_data_hint=1 \
