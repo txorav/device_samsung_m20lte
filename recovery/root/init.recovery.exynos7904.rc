@@ -55,21 +55,3 @@ on boot
     write /sys/devices/system/cpu/cpu5/cpufreq/scaling_governor performance
     write /sys/devices/system/cpu/cpu6/cpufreq/scaling_governor performance
     write /sys/devices/system/cpu/cpu7/cpufreq/scaling_governor performance
-
-    # FoxUI Remote scrcpy shim symlinks
-    symlink /system/bin/foxd /system/bin/app_process
-    symlink /system/bin/foxd /sbin/app_process
-    mkdir /sdcard/FoxUI 0775 media_rw media_rw
-    mkdir /sdcard/FoxUI/AppBackups 0775 media_rw media_rw
-    mkdir /sdcard/FoxUI/EFS_Vault 0775 media_rw media_rw
-
-    # FoxUI Control Daemon
-    start foxd
-
-service foxd /system/bin/foxd
-    class main
-    user root
-    group root system
-    socket foxd stream 0666 root system
-    seclabel u:r:recovery:s0
-    onrestart restart foxd
