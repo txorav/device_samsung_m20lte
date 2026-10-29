@@ -202,6 +202,51 @@ jobs:
             # 3. Checksums
             md5sum recovery.img > recovery.img.md5
             sha256sum recovery.img > recovery.img.sha256
+
+            # 4. Package AnyKernel3 recovery flashable zip
+            echo "Building AnyKernel3 recovery installer zip..."
+            AK3_DIR="/tmp/anykernel3"
+            rm -rf "$AK3_DIR"
+            git clone --depth=1 https://github.com/osm0sis/AnyKernel3 "$AK3_DIR"
+            cp -f recovery.img "$AK3_DIR/recovery.img"
+            cat << 'EOF' > "$AK3_DIR/anykernel.sh"
+### AnyKernel3 Recovery Installer Script
+## Samsung Galaxy M20 (m20lte)
+properties() { '
+kernel.string=AERA Recovery 16.0 for Samsung Galaxy M20
+do.devicecheck=1
+do.modules=0
+do.systemless=1
+do.cleanup=1
+do.cleanuponabort=0
+device.name1=m20lte
+device.name2=m20
+device.name3=SM-M205F
+device.name4=SM-M205FN
+device.name5=SM-M205G
+supported.versions=
+'; }
+
+BLOCK=/dev/block/platform/13500000.dwmmc0/by-name/RECOVERY;
+IS_SLOT_DEVICE=0;
+
+. tools/ak3-core.sh;
+
+ui_print " ";
+ui_print "- Flashing AERA Recovery to physical partition...";
+if [ -f recovery.img ]; then
+  cat recovery.img > $BLOCK;
+  ui_print "- AERA Recovery flashed successfully to $BLOCK!";
+else
+  ui_print "! Error: recovery.img not found!";
+  exit 1;
+fi;
+EOF
+            cd "$AK3_DIR"
+            zip -r9 -q "$OUT_DIR/AERA-16.0-m20lte-AnyKernel3.zip" * -x .git .github README.md
+            cd "$OUT_DIR"
+            md5sum AERA-16.0-m20lte-AnyKernel3.zip > AERA-16.0-m20lte-AnyKernel3.zip.md5
+            sha256sum AERA-16.0-m20lte-AnyKernel3.zip > AERA-16.0-m20lte-AnyKernel3.zip.sha256
             cd "$GITHUB_WORKSPACE"
           fi
           ls -lh "$OUT_DIR"
