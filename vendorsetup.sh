@@ -18,12 +18,12 @@
 FDEVICE="m20lte"
 
 aera_get_target_device() {
-local chkdev=$(echo "$BASH_SOURCE" | grep -w $FDEVICE)
+local chkdev=$(echo "$BASH_SOURCE" | grep -w $FDEVICE 2>/dev/null || true)
    if [ -n "$chkdev" ]; then
       AERA_BUILD_DEVICE="$FDEVICE"
       FOX_BUILD_DEVICE="$FDEVICE"
    else
-      chkdev=$(set | grep BASH_ARGV | grep -w $FDEVICE)
+      chkdev=$(set | grep -w $FDEVICE 2>/dev/null || true)
       if [ -n "$chkdev" ]; then
          AERA_BUILD_DEVICE="$FDEVICE"
          FOX_BUILD_DEVICE="$FDEVICE"
@@ -142,37 +142,23 @@ if [ "$1" = "$FDEVICE" -o "$AERA_BUILD_DEVICE" = "$FDEVICE" -o "$FOX_BUILD_DEVIC
 	export BOARD_HAS_DOWNLOAD_MODE=true
 
 	# Magisk setup
-	function download_magisk(){
-		local DEST=$1
-		if [ -n "${DEST}" ]; then
-			if [ ! -e ${DEST} ]; then
-				echo "Downloading the Latest Release of Magisk..."
-				local LATEST_MAGISK_URL=$(curl -sL https://api.github.com/repos/topjohnwu/Magisk/releases/latest | grep browser_download_url | grep Magisk- | cut -d : -f 2,3 | tr -d '"')
-				mkdir -p $(dirname ${DEST})
-				wget -q ${LATEST_MAGISK_URL} -O ${DEST} || wget ${LATEST_MAGISK_URL} -O ${DEST}
-				local RCODE=$?
-				if [ "$RCODE" = "0" ]; then
-					echo "Successfully Downloaded Magisk to ${DEST}!"
-				else
-					echo "Failed to Download Magisk to ${DEST}!"
-				fi
-			fi
-		fi
-	}
-	export FOX_USE_SPECIFIC_MAGISK_ZIP=~/Magisk/Magisk.zip
-	download_magisk $FOX_USE_SPECIFIC_MAGISK_ZIP
+	if [ -f "$HOME/Magisk/Magisk.zip" ]; then
+		export FOX_USE_SPECIFIC_MAGISK_ZIP="$HOME/Magisk/Magisk.zip"
+	elif [ -f ~/Magisk/Magisk.zip ]; then
+		export FOX_USE_SPECIFIC_MAGISK_ZIP="$HOME/Magisk/Magisk.zip"
+	fi
 
 	# Log Build VARs
 	if [ -n "$FOX_BUILD_LOG_FILE" -a -f "$FOX_BUILD_LOG_FILE" ]; then
-		export | grep "FOX" >> $FOX_BUILD_LOG_FILE
-		export | grep "OF_" >> $FOX_BUILD_LOG_FILE
-		export | grep "TARGET_" >> $FOX_BUILD_LOG_FILE
-		export | grep "TW_" >> $FOX_BUILD_LOG_FILE
+		export | grep "FOX" >> "$FOX_BUILD_LOG_FILE" 2>/dev/null || true
+		export | grep "OF_" >> "$FOX_BUILD_LOG_FILE" 2>/dev/null || true
+		export | grep "TARGET_" >> "$FOX_BUILD_LOG_FILE" 2>/dev/null || true
+		export | grep "TW_" >> "$FOX_BUILD_LOG_FILE" 2>/dev/null || true
 	elif [ -n "$AERA_BUILD_LOG_FILE" -a -f "$AERA_BUILD_LOG_FILE" ]; then
-		export | grep "AERA" >> $AERA_BUILD_LOG_FILE
-		export | grep "FOX" >> $AERA_BUILD_LOG_FILE
-		export | grep "OF_" >> $AERA_BUILD_LOG_FILE
-		export | grep "TARGET_" >> $AERA_BUILD_LOG_FILE
-		export | grep "TW_" >> $AERA_BUILD_LOG_FILE
+		export | grep "AERA" >> "$AERA_BUILD_LOG_FILE" 2>/dev/null || true
+		export | grep "FOX" >> "$AERA_BUILD_LOG_FILE" 2>/dev/null || true
+		export | grep "OF_" >> "$AERA_BUILD_LOG_FILE" 2>/dev/null || true
+		export | grep "TARGET_" >> "$AERA_BUILD_LOG_FILE" 2>/dev/null || true
+		export | grep "TW_" >> "$AERA_BUILD_LOG_FILE" 2>/dev/null || true
 	fi
 fi

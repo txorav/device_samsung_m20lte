@@ -238,8 +238,8 @@ jobs:
             export OF_VANILLA_BUILD=1
             echo "=== Compiling OrangeFox Recovery (Vanilla Edition) ==="
           else
-            export FOX_VANILLA_BUILD=0
-            export OF_VANILLA_BUILD=0
+            unset FOX_VANILLA_BUILD
+            unset OF_VANILLA_BUILD
             echo "=== Compiling OrangeFox Recovery (Standard Edition) ==="
           fi
 
@@ -249,7 +249,7 @@ jobs:
             --log "$GITHUB_WORKSPACE/$SRC_DIR/build.log" \
             --actions-log "$GITHUB_WORKSPACE/$SRC_DIR/opencode_agent_actions.log" \
             --max-retries 4 \
-            --command "source build/envsetup.sh && lunch \$MAKEFILE_NAME && export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE && mka -j\$BUILD_JOBS \$BUILD_TARGET"
+            --command "set +e; source build/envsetup.sh && lunch \$MAKEFILE_NAME && export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE && mka -j\$BUILD_JOBS \$BUILD_TARGET"
 
       - name: Package Odin Tar & Checksums
         if: success()

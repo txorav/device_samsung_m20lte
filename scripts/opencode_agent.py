@@ -95,9 +95,9 @@ class OpencodeAgent:
     # Auto-Remediation Handlers
     # =========================================================================
 
-    def fix_dexpreopt_user_userdebug(self, log_content):
+    def fix_dexpreopt_user_userdebug(self, log_content="", force=False):
         """Removes WITH_DEXPREOPT := false which breaks Android 12 lunch."""
-        if "DEXPREOPT must be enabled for user and userdebug builds" not in log_content:
+        if not force and "DEXPREOPT must be enabled for user and userdebug builds" not in log_content:
             return False
 
         self.log("Detected fatal DEXPREOPT enforcement in dex_preopt_config.mk", level="ACTION")
@@ -546,6 +546,8 @@ class OpencodeAgent:
         self.log(f"Command: {command}", level="INFO")
 
         current_env = os.environ.copy()
+        # Proactively neutralize fatal DEXPREOPT enforcement in core makefiles if present
+        self.fix_dexpreopt_user_userdebug(force=True)
 
         for attempt in range(1, max_retries + 1):
             self.log(f"--- Compilation Attempt {attempt} of {max_retries} ---", level="INFO")
