@@ -36,6 +36,8 @@ supported.versions=
 '; }
 
 BLOCK=/dev/block/platform/13500000.dwmmc0/by-name/RECOVERY;
+[ -b /dev/block/by-name/RECOVERY ] && BLOCK=/dev/block/by-name/RECOVERY;
+[ -b /dev/block/bootdevice/by-name/RECOVERY ] && BLOCK=/dev/block/bootdevice/by-name/RECOVERY;
 IS_SLOT_DEVICE=0;
 
 . tools/ak3-core.sh;

@@ -6,7 +6,7 @@
 /boot		    emmc	/dev/block/platform/13500000.dwmmc0/by-name/BOOT	    flags=display="Boot";backup=1;flashimg=1
 /recovery	    emmc	/dev/block/platform/13500000.dwmmc0/by-name/RECOVERY    flags=display="Recovery";backup=1;flashimg=1
 /cache		    ext4	/dev/block/platform/13500000.dwmmc0/by-name/CACHE       flags=display="Cache"
-/data		    f2fs	/dev/block/platform/13500000.dwmmc0/by-name/USERDATA    flags=display="Data";encryptable=footer;length=-20480
+/data		    f2fs	/dev/block/platform/13500000.dwmmc0/by-name/USERDATA    flags=display="Data";encryptable=footer;length=-20480;fileencryption=ice
 
 # Internal storage
 /storage        ext4   	/data/media/0                  		     		        flags=display="Internal Storage";usermrf;backup=1;fsflags="bind";removable
