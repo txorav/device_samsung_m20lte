@@ -137,5 +137,3 @@ TWRP_INCLUDE_LOGCAT := true
 AERA_INCLUDE_LOGCAT := true
 TARGET_USES_LOGD := true
 
-# Disable strict artifact path enforcement for recovery builds
-PRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS := false

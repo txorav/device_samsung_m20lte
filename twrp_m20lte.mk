@@ -33,3 +33,7 @@ PRODUCT_NAME := twrp_m20lte
 PRODUCT_MODEL := SM-M205F
 PRODUCT_BRAND := samsung
 PRODUCT_MANUFACTURER := samsung
+
+# Disable strict artifact path enforcement for recovery builds
+PRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS := false
+

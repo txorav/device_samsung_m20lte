@@ -314,16 +314,28 @@ class OpencodeAgent:
             except Exception as e:
                 self.log(f"Failed patching artifact_path_requirements.mk: {e}", level="WARN")
 
-        # Also add to BoardConfig.mk
+        # Ensure removed from BoardConfig.mk (where product vars are readonly)
         board_cfg = self.device_dir / "BoardConfig.mk"
         if board_cfg.exists():
             try:
                 c = board_cfg.read_text(encoding="utf-8")
-                if "PRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS" not in c:
-                    c += "\nPRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS := false\n"
+                if "PRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS" in c:
+                    c = re.sub(r"^[ \t]*PRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS[ \t:?+]*=.*$\n?", "", c, flags=re.MULTILINE)
                     board_cfg.write_text(c, encoding="utf-8")
-            except Exception as e:
-                self.log(f"Failed updating BoardConfig.mk: {e}", level="WARN")
+            except Exception:
+                pass
+
+        # Add to product makefile (e.g. twrp_m20lte.mk) where product variables are valid
+        for pfile in [self.device_dir / "twrp_m20lte.mk", self.device_dir / "device.mk"]:
+            if pfile.exists():
+                try:
+                    c = pfile.read_text(encoding="utf-8")
+                    if "PRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS" not in c:
+                        c += "\nPRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS := false\n"
+                        pfile.write_text(c, encoding="utf-8")
+                except Exception as e:
+                    self.log(f"Failed updating {pfile.name}: {e}", level="WARN")
+
 
         desc = "Disabled strict artifact path requirements (DISABLE_ARTIFACT_PATH_REQUIREMENTS=true)"
         self.log(f"Remediation: {desc}", level="SUCCESS")
