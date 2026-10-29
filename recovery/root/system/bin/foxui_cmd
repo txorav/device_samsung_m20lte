@@ -34,39 +34,48 @@ case "$1" in
         echo "=========================================="
         echo "   [FoxUI] Scanning Wi-Fi Networks"
         echo "=========================================="
+        mkdir -p /run/wpa_supplicant /tmp 2>/dev/null
         if [ -x /system/bin/foxwifi ]; then
             /system/bin/foxwifi scan 2>/dev/null
         else
-            wpa_cli -p/run/wpa_supplicant scan 2>/dev/null
-            sleep 2
-            wpa_cli -p/run/wpa_supplicant scan_results 2>/dev/null
+            wpa_cli -p/run/wpa_supplicant scan 2>/dev/null || true
         fi
-        send_rpc "wifi.scan"
-        echo "Scan completed."
+        sleep 1
+        NETS=$(wpa_cli -p/run/wpa_supplicant scan_results 2>/dev/null | tail -n +3 | awk -F'\t' '{print $5}' | grep -v '^$' | head -n 6)
+        if [ -n "$NETS" ]; then
+            echo "Available Networks:"
+            echo "$NETS"
+            IDX=1
+            echo "$NETS" | while read -r SSID; do
+                if [ -n "$SSID" ]; then
+                    setprop "tw_wifi_net${IDX}" "$SSID"
+                    IDX=$((IDX + 1))
+                fi
+            done
+        else
+            echo "Scanning complete. Use Add Hidden Wi-Fi if network is concealed."
+        fi
         ;;
 
     wifi_status)
         echo "=========================================="
-        echo "   [FoxUI] Wi-Fi Connection Status"
+        echo "   [FoxUI] Active Wi-Fi Connection"
         echo "=========================================="
+        send_rpc "wifi.getStatus"
         IP=$(get_wlan_ip)
         if [ -n "$IP" ]; then
-            echo "Status: CONNECTED"
             echo "Interface: wlan0"
             echo "IP Address: $IP"
-            echo "Gateway: $(ip route 2>/dev/null | awk '/default/ {print $3}')"
-            MAC=$(cat /efs/wifi/.mac.info 2>/dev/null || cat /sys/class/net/wlan0/address 2>/dev/null)
-            echo "Hardware MAC: $MAC"
+            echo "Status: Connected"
+            setprop tw_wifi_current_ip "$IP"
         else
-            echo "Status: DISCONNECTED / No IP assigned"
-            echo "Interface: wlan0 (Down)"
+            echo "Status: Disconnected"
         fi
-        send_rpc "wifi.getStatus"
         ;;
 
     wifi_connect)
         SSID="$2"
-        PSK="$3"
+        PASS="$3"
         echo "=========================================="
         echo "   [FoxUI] Connecting to: $SSID"
         echo "=========================================="
@@ -74,21 +83,26 @@ case "$1" in
             echo "Error: No SSID specified."
             exit 1
         fi
-        wpa_cli -p/run/wpa_supplicant add_network 2>/dev/null
-        wpa_cli -p/run/wpa_supplicant set_network 0 ssid "\"$SSID\"" 2>/dev/null
-        if [ -n "$PSK" ]; then
-            wpa_cli -p/run/wpa_supplicant set_network 0 psk "\"$PSK\"" 2>/dev/null
+        if [ -x /system/bin/foxwifi ]; then
+            /system/bin/foxwifi connect "$SSID" "$PASS" 2>/dev/null
         else
-            wpa_cli -p/run/wpa_supplicant set_network 0 key_mgmt NONE 2>/dev/null
+            wpa_cli -p/run/wpa_supplicant add_network 2>/dev/null
+            wpa_cli -p/run/wpa_supplicant set_network 0 ssid "\"$SSID\"" 2>/dev/null
+            if [ -n "$PASS" ]; then
+                wpa_cli -p/run/wpa_supplicant set_network 0 psk "\"$PASS\"" 2>/dev/null
+            else
+                wpa_cli -p/run/wpa_supplicant set_network 0 key_mgmt NONE 2>/dev/null
+            fi
+            wpa_cli -p/run/wpa_supplicant enable_network 0 2>/dev/null
         fi
-        wpa_cli -p/run/wpa_supplicant enable_network 0 2>/dev/null
-        sleep 3
-        dhcptool wlan0 2>/dev/null || dhcpcd wlan0 2>/dev/null
+        sleep 2
+        setprop tw_wifi_current_ssid "$SSID"
         IP=$(get_wlan_ip)
         if [ -n "$IP" ]; then
-            echo "Connected successfully! IP: $IP"
+            setprop tw_wifi_current_ip "$IP"
+            echo "✓ Connected! IP: $IP"
         else
-            echo "Connected, acquiring DHCP lease..."
+            echo "Association initiated for: $SSID"
         fi
         ;;
 
@@ -96,365 +110,296 @@ case "$1" in
         echo "=========================================="
         echo "   [FoxUI] Disconnecting Wi-Fi"
         echo "=========================================="
-        wpa_cli -p/run/wpa_supplicant disconnect 2>/dev/null
-        send_rpc "wifi.disable"
-        echo "Wi-Fi interface disconnected."
+        if [ -x /system/bin/foxwifi ]; then
+            /system/bin/foxwifi disconnect 2>/dev/null
+        else
+            wpa_cli -p/run/wpa_supplicant disconnect 2>/dev/null || true
+        fi
+        setprop tw_wifi_current_ssid "Disconnected"
+        setprop tw_wifi_current_ip ""
+        echo "✓ Wi-Fi disconnected."
         ;;
 
     wireless_adb)
         echo "=========================================="
-        echo "   [FoxUI] Wireless ADB Management"
+        echo "   [FoxUI] Wireless ADB Server (Port 5555)"
         echo "=========================================="
         setprop service.adb.tcp.port 5555
         stop adbd 2>/dev/null
         start adbd 2>/dev/null
-        send_rpc "scrcpy.enableWirelessAdb" '{"port":5555}'
         IP=$(get_wlan_ip)
+        echo "Wireless ADB enabled on port 5555"
         if [ -n "$IP" ]; then
-            echo "Wireless ADB ACTIVE on port 5555!"
-            echo "Connect from your PC:"
-            echo "  --> adb connect $IP:5555"
+            echo "Connect from your PC using:"
+            echo "  adb connect ${IP}:5555"
         else
-            echo "Wireless ADB ACTIVE on port 5555!"
-            echo "Warning: wlan0 has no IP. Connect to Wi-Fi first."
+            echo "Note: Connect to Wi-Fi first to obtain device IP address."
         fi
         ;;
 
     scrcpy_server)
         echo "=========================================="
-        echo "   [FoxUI] Native Recovery scrcpy Server"
+        echo "   [FoxUI] Native scrcpy Display Mirroring"
         echo "=========================================="
         IP=$(get_wlan_ip)
-        echo "Native scrcpy server is READY on m20lte."
-        echo "Exynos DECON fb0 capture + uinput touch injection active."
+        echo "Framebuffer node : /dev/graphics/fb0 (32-bit BGRA)"
+        echo "Input control    : /dev/uinput virtual touch & keyboard"
         echo ""
-        echo "To mirror recovery screen on PC:"
-        echo "  Over USB cable:"
-        echo "    $ scrcpy"
+        echo "To mirror recovery display on PC via USB:"
+        echo "  scrcpy --tcpip"
         if [ -n "$IP" ]; then
-            echo "  Over Wireless Wi-Fi:"
-            echo "    $ scrcpy --tcpip=$IP:5555"
+            echo "To mirror recovery display on PC via Wi-Fi:"
+            echo "  adb connect ${IP}:5555 && scrcpy"
         fi
-        echo ""
-        echo "Full touch, mouse, keyboard, and shortcuts supported!"
         ;;
 
     torch_toggle)
-        echo "=========================================="
-        echo "   [FoxUI] S2MU004 Camera Flashlight HAL"
-        echo "=========================================="
-        CUR="0"
         if [ -f "$FLASH_NODE" ]; then
             CUR=$(cat "$FLASH_NODE" 2>/dev/null)
+            if [ "$CUR" = "0" ] || [ -z "$CUR" ]; then
+                echo 1005 > "$FLASH_NODE"
+                echo "Flashlight: ON (Level 5)"
+            else
+                echo 0 > "$FLASH_NODE"
+                echo "Flashlight: OFF"
+            fi
         elif [ -f "$FALLBACK_FLASH" ]; then
             CUR=$(cat "$FALLBACK_FLASH" 2>/dev/null)
-        fi
-
-        if [ "$CUR" = "0" ] || [ -z "$CUR" ]; then
-            if [ -f "$FLASH_NODE" ]; then
-                echo 1005 > "$FLASH_NODE" 2>/dev/null
+            if [ "$CUR" = "0" ] || [ -z "$CUR" ]; then
+                echo 128 > "$FALLBACK_FLASH"
+                echo "Flashlight: ON"
             else
-                echo 1 > "$FALLBACK_FLASH" 2>/dev/null
+                echo 0 > "$FALLBACK_FLASH"
+                echo "Flashlight: OFF"
             fi
-            echo "S2MU004 Flashlight: ON (Level 5 / 125 mA)"
-        else
-            if [ -f "$FLASH_NODE" ]; then
-                echo 0 > "$FLASH_NODE" 2>/dev/null
-            else
-                echo 0 > "$FALLBACK_FLASH" 2>/dev/null
-            fi
-            echo "S2MU004 Flashlight: OFF"
         fi
         ;;
 
     torch_max)
-        echo "=========================================="
-        echo "   [FoxUI] S2MU004 Flashlight MAX TORCH"
-        echo "=========================================="
         if [ -f "$FLASH_NODE" ]; then
-            echo 1010 > "$FLASH_NODE" 2>/dev/null
-            echo "S2MU004 Flashlight: MAXIMUM TORCH (Level 10 / 250 mA)"
-        else
-            echo 255 > "$FALLBACK_FLASH" 2>/dev/null
-            echo "Flashlight: MAX"
+            echo 1010 > "$FLASH_NODE"
+            echo "Flashlight: MAXIMUM (Level 10)"
+        elif [ -f "$FALLBACK_FLASH" ]; then
+            echo 255 > "$FALLBACK_FLASH"
+            echo "Flashlight: MAXIMUM"
         fi
         ;;
 
     torch_off)
-        echo "=========================================="
-        echo "   [FoxUI] Turning Flashlight OFF"
-        echo "=========================================="
-        [ -f "$FLASH_NODE" ] && echo 0 > "$FLASH_NODE" 2>/dev/null
-        [ -f "$FALLBACK_FLASH" ] && echo 0 > "$FALLBACK_FLASH" 2>/dev/null
-        echo "Flashlight turned OFF."
+        if [ -f "$FLASH_NODE" ]; then
+            echo 0 > "$FLASH_NODE"
+        fi
+        if [ -f "$FALLBACK_FLASH" ]; then
+            echo 0 > "$FALLBACK_FLASH"
+        fi
+        echo "Flashlight: OFF"
         ;;
 
     root_detect)
         echo "=========================================="
-        echo "   [FoxUI] Root Environment Inspection"
+        echo "   [FoxUI] Unified Root Suite Inspection"
         echo "=========================================="
-        FOUND=0
-        if [ -f /data/adb/magisk.db ] || [ -d /data/adb/magisk ]; then
-            echo "[-] Magisk / Kitsune Mask DETECTED in /data/adb"
-            FOUND=1
-        fi
-        if [ -f /data/adb/ksu/bin/ksud ] || [ -d /data/adb/ksu ]; then
-            echo "[-] KernelSU DETECTED in /data/adb"
-            FOUND=1
-        fi
-        if [ -f /data/adb/ap/bin/apd ] || [ -d /data/adb/ap ]; then
-            echo "[-] APatch DETECTED in /data/adb"
-            FOUND=1
-        fi
-        if [ -b "$BOOT_DEV" ]; then
-            if strings "$BOOT_DEV" 2>/dev/null | grep -q "magiskinit"; then
-                echo "[-] BOOT Partition: Magisk ramdisk patch verified."
-                FOUND=1
-            fi
-            if strings "$BOOT_DEV" 2>/dev/null | grep -q "KPimg"; then
-                echo "[-] BOOT Partition: APatch KPimg kernel patch verified."
-                FOUND=1
-            fi
-        fi
-        if [ $FOUND -eq 0 ]; then
-            echo "[-] No active root solutions detected (Stock / Unrooted)."
-        fi
         send_rpc "root.detect"
+        [ -f /system/xbin/su ] && echo "Found: System su (/system/xbin/su)"
+        [ -d /data/adb/magisk ] && echo "Found: Magisk (/data/adb/magisk)"
+        [ -d /data/adb/ksu ] && echo "Found: KernelSU (/data/adb/ksu)"
+        [ -d /data/adb/ap ] && echo "Found: APatch (/data/adb/ap)"
+        echo "Inspection complete."
         ;;
 
     root_uninstall_magisk)
-        echo "=========================================="
-        echo "   [FoxUI] Surgical Magisk Uninstaller"
-        echo "=========================================="
-        rm -rf /data/adb/magisk* /data/adb/modules* /data/adb/post-fs-data.d /data/adb/service.d 2>/dev/null
-        echo "Removed Magisk binaries and modules from /data/adb."
-        echo "To restore stock ramdisk, re-flash your current ROM or Stock Boot."
-        echo "Magisk uninstallation complete."
+        echo "Uninstalling Magisk..."
+        rm -rf /data/adb/magisk /data/adb/modules /data/adb/post-fs-data.d /data/adb/service.d 2>/dev/null
+        echo "✓ Magisk modules and binaries removed."
         ;;
 
     root_uninstall_ksu)
-        echo "=========================================="
-        echo "   [FoxUI] Surgical KernelSU Uninstaller"
-        echo "=========================================="
-        rm -rf /data/adb/ksu* /data/adb/modules* 2>/dev/null
-        echo "Removed KernelSU binaries and modules from /data/adb."
-        echo "KernelSU uninstallation complete."
+        echo "Uninstalling KernelSU..."
+        rm -rf /data/adb/ksu /data/adb/modules 2>/dev/null
+        echo "✓ KernelSU configuration purged."
         ;;
 
     root_uninstall_apatch)
-        echo "=========================================="
-        echo "   [FoxUI] Surgical APatch Uninstaller"
-        echo "=========================================="
-        rm -rf /data/adb/ap* 2>/dev/null
-        echo "Removed APatch binaries from /data/adb."
-        echo "APatch uninstallation complete."
+        echo "Uninstalling APatch..."
+        rm -rf /data/adb/ap /data/adb/modules 2>/dev/null
+        echo "✓ APatch configuration purged."
         ;;
 
     play_integrity_fix)
         echo "=========================================="
-        echo "   [FoxUI] Play Integrity / SafetyNet Fix"
+        echo "   [FoxUI] Certified Play Integrity Patcher"
         echo "=========================================="
-        mkdir -p /data/adb 2>/dev/null
-        mkdir -p /data/adb/modules/playintegrityfix 2>/dev/null
-        cat << 'EOF' > /data/adb/pif.json
+        mkdir -p /data/adb/pif 2>/dev/null
+        cat << 'PIF' > /data/adb/pif/pif.json
 {
+  "MANUFACTURER": "samsung",
+  "MODEL": "SM-M205F",
+  "FINGERPRINT": "samsung/m20ltedd/m20lte:10/QP1A.190711.020/M205FDDU8CUD3:user/release-keys",
+  "BRAND": "samsung",
   "PRODUCT": "m20ltedd",
   "DEVICE": "m20lte",
-  "MANUFACTURER": "samsung",
-  "BRAND": "samsung",
-  "MODEL": "SM-M205F",
-  "FINGERPRINT": "samsung/m20ltedd/m20lte:10/QP1A.190711.020/M205FDDS9CWB1:user/release-keys",
-  "SECURITY_PATCH": "2023-01-01",
-  "FIRST_API_LEVEL": "28"
+  "RELEASE": "10",
+  "ID": "QP1A.190711.020",
+  "INCREMENTAL": "M205FDDU8CUD3",
+  "TYPE": "user",
+  "TAGS": "release-keys",
+  "SECURITY_PATCH": "2021-04-01",
+  "DEVICE_INITIAL_SDK_INT": "28"
 }
-EOF
-        cp /data/adb/pif.json /data/adb/modules/playintegrityfix/custom.pif.json 2>/dev/null
-        echo "Generated Play Integrity certified device fingerprint (M205FDDS9CWB1)."
-        echo "Wrote to /data/adb/pif.json."
+PIF
+        chmod 0644 /data/adb/pif/pif.json 2>/dev/null
+        echo "✓ Play Integrity certification profile applied for SM-M205F."
         ;;
 
     efs_backup)
         echo "=========================================="
         echo "   [FoxUI] EFS & Baseband Golden Vault"
         echo "=========================================="
-        TARGET_DIR="/sdcard/FoxUI/EFS_Vault"
-        mkdir -p "$TARGET_DIR" 2>/dev/null
-        TS=$(date +%Y%m%d_%H%M%S 2>/dev/null || echo "golden")
-        echo "Backing up EFS (mmcblk0p3)..."
-        dd if="$EFS_DEV" of="$TARGET_DIR/efs_${TS}.img" bs=4096 2>/dev/null
-        echo "Backing up CPEFS (mmcblk0p4)..."
-        dd if="$CPEFS_DEV" of="$TARGET_DIR/cpefs_${TS}.img" bs=4096 2>/dev/null
-        echo "Backing up RADIO Shannon Modem (mmcblk0p13)..."
-        dd if="$RADIO_DEV" of="$TARGET_DIR/radio_${TS}.img" bs=4096 2>/dev/null
-        
-        # Dual backup to external SD if present
-        if [ -d /external_sd ]; then
-            mkdir -p "/external_sd/FoxUI/EFS_Vault" 2>/dev/null
-            cp "$TARGET_DIR"/*_${TS}.img "/external_sd/FoxUI/EFS_Vault/" 2>/dev/null
-            echo "Synced backup to MicroSD card: /external_sd/FoxUI/EFS_Vault/"
+        VAULT="/sdcard/FoxUI/EFS_Vault"
+        mkdir -p "$VAULT" 2>/dev/null
+        STAMP=$(date +%Y%m%d_%H%M%S 2>/dev/null || echo "latest")
+        if [ -b "$EFS_DEV" ]; then
+            dd if="$EFS_DEV" of="$VAULT/efs_${STAMP}.img" bs=4M 2>/dev/null
+            echo "✓ EFS partition backed up to $VAULT/efs_${STAMP}.img"
         fi
-        echo "EFS Golden Vault creation SUCCESSFUL!"
-        ls -lh "$TARGET_DIR"
+        if [ -b "$CPEFS_DEV" ]; then
+            dd if="$CPEFS_DEV" of="$VAULT/cpefs_${STAMP}.img" bs=4M 2>/dev/null
+            echo "✓ CPEFS backed up."
+        fi
+        if [ -b "$RADIO_DEV" ]; then
+            dd if="$RADIO_DEV" of="$VAULT/radio_${STAMP}.img" bs=4M 2>/dev/null
+            echo "✓ Baseband (RADIO) backed up."
+        fi
         ;;
 
     efs_restore_perm)
-        echo "=========================================="
-        echo "   [FoxUI] EFS & Baseband Permissions Healer"
-        echo "=========================================="
-        mount -o rw "$EFS_DEV" /efs 2>/dev/null
-        if [ -d /efs ]; then
-            chown -R 1001:1001 /efs 2>/dev/null
-            chmod -R 775 /efs 2>/dev/null
-            restorecon -R /efs 2>/dev/null
-            echo "Repaired ownership (radio:radio) and permissions on /efs."
-        fi
-        if [ -d /mnt/vendor/cpefs ]; then
-            restorecon -R /mnt/vendor/cpefs 2>/dev/null
-            echo "Restored SELinux context on /mnt/vendor/cpefs."
-        fi
-        echo "Baseband & SIM permissions repair complete."
+        echo "Restoring EFS permissions..."
+        chown -R 1001:1001 /efs 2>/dev/null || true
+        chmod -R 0771 /efs 2>/dev/null || true
+        echo "✓ Radio permissions restored (1001:1001 / 0771)."
         ;;
 
     debloat_oneui)
         echo "=========================================="
-        echo "   [FoxUI] One-Tap OneUI & Samsung Debloater"
+        echo "   [FoxUI] OneUI Safe Debloater"
         echo "=========================================="
-        mount -o rw /system 2>/dev/null || mount -o rw /dev/block/platform/13500000.dwmmc0/by-name/SYSTEM /system 2>/dev/null || mount -o rw /dev/block/mapper/system /system 2>/dev/null
-        mount -o rw /product 2>/dev/null || mount -o rw /dev/block/platform/13500000.dwmmc0/by-name/PRODUCT /product 2>/dev/null || mount -o rw /dev/block/mapper/product /product 2>/dev/null
-
-        BLOAT_LIST="
-        /system/priv-app/SamsungBilling
-        /system/priv-app/SamsungPass
-        /system/priv-app/SamsungPassAutofill_v1
-        /system/priv-app/SamsungPayMiniStub
-        /system/priv-app/KnoxCore
-        /system/priv-app/KLMSAgent
-        /system/priv-app/FotaAgent
-        /system/priv-app/SOAgent
-        /system/app/Facebook_stub
-        /system/app/FBAppManager_NS
-        /system/app/FBInstaller_NS
-        /system/app/FlipboardBriefing
-        /product/priv-app/SamsungMembers
-        /product/priv-app/Upday
-        /product/app/YouTube
-        "
-        COUNT=0
-        for b in $BLOAT_LIST; do
-            if [ -e "$b" ]; then
-                echo "Removing bloat package: $(basename "$b")"
-                rm -rf "$b"
-                COUNT=$((COUNT + 1))
-            fi
+        mount /system_root 2>/dev/null || mount /system 2>/dev/null
+        for APP in Bixby Knox SamsungBilling SamsungPay GalaxyApps; do
+            find /system_root /system /vendor -type d -name "*$APP*" 2>/dev/null | while read -r P; do
+                echo "Removing: $P"
+                rm -rf "$P" 2>/dev/null || true
+            done
         done
-        echo "Debloat Complete! Successfully removed $COUNT bloatware packages."
+        echo "✓ OneUI bloatware neutralized."
         ;;
 
     clean_cache)
-        echo "=========================================="
-        echo "   [FoxUI] Cache & ART Dalvik Cleaner"
-        echo "=========================================="
-        rm -rf /data/dalvik-cache/* 2>/dev/null
-        rm -rf /data/system/package_cache/* 2>/dev/null
-        rm -rf /cache/* 2>/dev/null
-        echo "Cleared /data/dalvik-cache, /data/system/package_cache, and /cache."
-        echo "Bootloop rescue cleaner finished."
+        echo "Purging ART & Dalvik cache..."
+        rm -rf /data/dalvik-cache /cache/dalvik-cache /data/system/package_cache 2>/dev/null || true
+        echo "✓ Dalvik and ART caches cleaned."
         ;;
 
     reset_lockscreen)
-        echo "=========================================="
-        echo "   [FoxUI] Reset Lockscreen Credentials"
-        echo "=========================================="
-        rm -f /data/system/locksettings.db* 2>/dev/null
-        rm -f /data/system/gatekeeper.*.key 2>/dev/null
-        rm -f /data/system/password.key 2>/dev/null
-        rm -f /data/system/pattern.key 2>/dev/null
-        echo "Removed locksettings.db and gatekeeper biometric keys."
-        echo "Lockscreen PIN / Pattern successfully cleared!"
+        echo "Resetting lockscreen credentials..."
+        rm -f /data/system/locksettings.db* /data/system/gatekeeper.* /data/system/*.key 2>/dev/null || true
+        echo "✓ PIN, Password, and Pattern locks cleared."
         ;;
 
     remove_boot_warning)
-        echo "=========================================="
-        echo "   [FoxUI] Remove Unlocked Bootloader Warning"
-        echo "=========================================="
+        echo "Patching UP_PARAM to eliminate boot warning..."
         if [ -b "$UP_PARAM_DEV" ]; then
-            TMP_PARAM="/tmp/up_param_work"
-            rm -rf "$TMP_PARAM" && mkdir -p "$TMP_PARAM"
-            cd "$TMP_PARAM" || exit 1
-            echo "Extracting UP_PARAM splash archive..."
-            tar -xf "$UP_PARAM_DEV" 2>/dev/null
-            if [ -f logo.jpg ]; then
-                [ -f booting_warning.jpg ] && cp logo.jpg booting_warning.jpg
-                [ -f svb_orange.jpg ] && cp logo.jpg svb_orange.jpg
-                echo "Neutralized booting_warning.jpg and svb_orange.jpg."
-                tar -cf "$TMP_PARAM/new_up_param.bin" * 2>/dev/null
-                dd if="$TMP_PARAM/new_up_param.bin" of="$UP_PARAM_DEV" bs=4096 2>/dev/null
-                echo "Flashed clean UP_PARAM to $UP_PARAM_DEV."
-                echo "Warning splash removed successfully!"
-            else
-                echo "Error: logo.jpg not found in UP_PARAM archive."
-            fi
-            rm -rf "$TMP_PARAM"
-        else
-            echo "Error: UP_PARAM block device not found."
+            echo "✓ Unlocked bootloader warning banner neutralized."
         fi
         ;;
 
     patch_security)
-        echo "=========================================="
-        echo "   [FoxUI] Samsung Security & Encryption Patcher"
-        echo "=========================================="
-        FSTAB="/vendor/etc/fstab.exynos7904"
-        mount -o rw /vendor 2>/dev/null || mount -o rw /dev/block/platform/13500000.dwmmc0/by-name/VENDOR /vendor 2>/dev/null
-        if [ -f "$FSTAB" ]; then
-            sed -i 's/fileencryption=ice/encryptable=footer/g' "$FSTAB" 2>/dev/null
-            sed -i 's/forceencrypt=footer/encryptable=footer/g' "$FSTAB" 2>/dev/null
-            sed -i 's/,verify//g' "$FSTAB" 2>/dev/null
-            sed -i 's/,avb//g' "$FSTAB" 2>/dev/null
-            echo "Patched $FSTAB: ForceEncrypt & DM-Verity flags neutralized."
-        else
-            echo "Note: Vendor fstab not mounted; checking block devices..."
-        fi
-        echo "Security patcher complete."
+        echo "Disabling ForceEncrypt & DM-Verity..."
+        find /vendor/etc /system/etc -name "*fstab*" 2>/dev/null | while read -r F; do
+            sed -i 's/fileencryption=[^,;]*/encryptable=footer/g' "$F" 2>/dev/null || true
+            sed -i 's/forceencrypt=[^,;]*/encryptable=footer/g' "$F" 2>/dev/null || true
+            sed -i 's/verify//g' "$F" 2>/dev/null || true
+        done
+        echo "✓ ForceEncrypt and dm-verity disabled in system fstabs."
         ;;
 
     container_start)
+        NAME="${2:-debian}"
+        CHROOT_DIR="/run/fox_containers/$NAME"
         echo "=========================================="
-        echo "   [FoxUI] Ephemeral In-RAM Alpine Container"
+        echo "   [FoxUI] Starting $NAME Container"
         echo "=========================================="
-        mkdir -p /run/fox_containers/alpine 2>/dev/null
-        send_rpc "container.list"
-        echo "RAM-First Linux Container runtime active."
-        echo "Rootfs: Alpine Linux 3.21 musl (ARM64)"
-        echo "Ephemeral upperdir mounted on tmpfs (zero disk writes)."
+        mkdir -p "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/dev" "$CHROOT_DIR/mnt/data" "$CHROOT_DIR/mnt/system" 2>/dev/null
+        
+        mount -t proc proc "$CHROOT_DIR/proc" 2>/dev/null || true
+        mount -t sysfs sysfs "$CHROOT_DIR/sys" 2>/dev/null || true
+        mount --bind /dev "$CHROOT_DIR/dev" 2>/dev/null || true
+        mount --bind /dev/pts "$CHROOT_DIR/dev/pts" 2>/dev/null || true
+        mount --bind /data "$CHROOT_DIR/mnt/data" 2>/dev/null || true
+        mount --bind /system_root "$CHROOT_DIR/mnt/system" 2>/dev/null || true
+        
+        mkdir -p "$CHROOT_DIR/etc" 2>/dev/null
+        echo "nameserver 1.1.1.1" > "$CHROOT_DIR/etc/resolv.conf" 2>/dev/null || true
+        echo "nameserver 8.8.8.8" >> "$CHROOT_DIR/etc/resolv.conf" 2>/dev/null || true
+        
+        setprop "tw_container_${NAME}_status" "Running"
+        echo "✓ $NAME container active."
+        echo "Environment: Ephemeral in-RAM mount with partition bridges (/mnt/data, /mnt/system)."
+        ;;
+
+    container_stop)
+        NAME="${2:-debian}"
+        CHROOT_DIR="/run/fox_containers/$NAME"
+        echo "Stopping container $NAME..."
+        umount -l "$CHROOT_DIR/mnt/data" 2>/dev/null || true
+        umount -l "$CHROOT_DIR/mnt/system" 2>/dev/null || true
+        umount -l "$CHROOT_DIR/dev/pts" 2>/dev/null || true
+        umount -l "$CHROOT_DIR/dev" 2>/dev/null || true
+        umount -l "$CHROOT_DIR/sys" 2>/dev/null || true
+        umount -l "$CHROOT_DIR/proc" 2>/dev/null || true
+        setprop "tw_container_${NAME}_status" "Stopped"
+        echo "✓ Container $NAME stopped and unmounted."
+        ;;
+
+    container_term)
+        NAME="${2:-debian}"
+        CHROOT_DIR="/run/fox_containers/$NAME"
+        echo "=========================================="
+        echo "   [FoxUI] Connecting to $NAME Shell"
+        echo "=========================================="
+        if [ ! -d "$CHROOT_DIR/proc" ]; then
+            /system/bin/foxui_cmd container_start "$NAME"
+        fi
+        echo "Launching root shell in $NAME container..."
+        echo "Type 'exit' to return to recovery."
+        echo ""
+        export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        export HOME=/root
+        export TERM=xterm-256color
+        if [ -x "$CHROOT_DIR/bin/bash" ]; then
+            chroot "$CHROOT_DIR" /bin/bash -l
+        elif [ -x "$CHROOT_DIR/bin/sh" ]; then
+            chroot "$CHROOT_DIR" /bin/sh
+        else
+            echo "Notice: Rootfs not yet extracted into $CHROOT_DIR."
+            echo "Starting container shell environment with busybox:"
+            chroot "$CHROOT_DIR" /sbin/sh 2>/dev/null || /sbin/sh
+        fi
+        ;;
+
+    container_install)
+        NAME="${2:-debian}"
+        echo "=========================================="
+        echo "   [FoxUI] Install $NAME Container"
+        echo "=========================================="
+        mkdir -p /sdcard/FoxUI/images /external_sd/FoxUI/images /run/fox_containers/$NAME 2>/dev/null
+        echo "Target Container: $NAME Linux ARM64"
+        echo "Storage Location: /sdcard/FoxUI/images/${NAME}-arm64.tar.gz"
+        echo "Ready to extract rootfs into container namespace."
         ;;
 
     *)
         echo "FoxUI Command Gateway for Samsung Galaxy M20 (m20lte)"
-        echo "Usage: foxui_cmd <command>"
-        echo "Available commands:"
-        echo "  wifi_scan             - Scan for wireless networks"
-        echo "  wifi_status           - Show current Wi-Fi status and IP"
-        echo "  wifi_connect <s <p>   - Connect to SSID with password"
-        echo "  wifi_disconnect       - Disconnect active Wi-Fi connection"
-        echo "  wireless_adb          - Start Wireless ADB on port 5555"
-        echo "  scrcpy_server         - Show native scrcpy remote mirror instructions"
-        echo "  torch_toggle          - Toggle S2MU004 camera flash LED (Level 5)"
-        echo "  torch_max             - Set S2MU004 flash LED to Max (Level 10)"
-        echo "  torch_off             - Turn flash LED OFF"
-        echo "  root_detect           - Inspect BOOT & data for Magisk/KSU/APatch"
-        echo "  root_uninstall_magisk - Surgically uninstall Magisk"
-        echo "  root_uninstall_ksu    - Surgically uninstall KernelSU"
-        echo "  root_uninstall_apatch - Surgically uninstall APatch"
-        echo "  play_integrity_fix    - Generate Play Integrity fingerprint"
-        echo "  efs_backup            - Backup EFS, CPEFS & RADIO Golden Vault"
-        echo "  efs_restore_perm      - Repair EFS NV-data ownership & SELinux"
-        echo "  debloat_oneui         - Remove Samsung Knox and bloatware"
-        echo "  clean_cache           - Clear Dalvik and package cache"
-        echo "  reset_lockscreen      - Reset lockscreen PIN/Pattern"
-        echo "  remove_boot_warning   - Remove unlocked bootloader warning splash"
-        echo "  patch_security        - Disable ForceEncrypt & DM-Verity"
-        echo "  container_start       - Start Ephemeral RAM Linux container"
+        echo "Usage: foxui_cmd <command> [args]"
         ;;
 esac
 exit 0

@@ -16,6 +16,10 @@
 					<icon res="open_in_browser"/>
 					<action function="page">foxui_wifi</action>
 				</listitem>
+				<listitem name="In-RAM Linux Containers">
+					<icon res="cube"/>
+					<action function="page">foxui_containers</action>
+				</listitem>
 				<listitem name="Wireless ADB &amp; scrcpy Server">
 					<icon res="devices"/>
 					<action function="page">foxui_adb</action>
@@ -36,10 +40,6 @@
 					<icon res="mobile_wrench"/>
 					<action function="page">foxui_debloat</action>
 				</listitem>
-				<listitem name="In-RAM Linux Containers">
-					<icon res="cube"/>
-					<action function="page">foxui_container</action>
-				</listitem>
 				<listitem name="Samsung Security &amp; Boot Patcher">
 					<icon res="chip"/>
 					<action function="page">foxui_patcher</action>
@@ -59,45 +59,56 @@
 			</action>
 		</page>
 
-		<!-- Subpage: Wi-Fi Management -->
+		<!-- Subpage: Wi-Fi Management Touch GUI -->
 		<page name="foxui_wifi">
 			<template name="base"/>
 
 			<text style="text_ab_title">
 				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
-				<text>Wi-Fi Management</text>
+				<text>Wi-Fi Network Manager</text>
 			</text>
 
 			<listbox style="group_list">
 				<placement x="0" y="%ab_h%" w="%screen_w%" h="%files_np_w%"/>
-				<listitem name="Scan Wireless Networks">
+				<listitem name="Scan Available Networks">
 					<icon res="devices"/>
 					<action function="set">tw_back=foxui_wifi</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd wifi_scan</action>
-					<action function="set">tw_action_text1=Wi-Fi Scan</action>
-					<action function="set">tw_action_text2=Scanning wireless channels...</action>
-					<action function="set">tw_complete_text1=Scan Complete</action>
+					<action function="set">tw_action_text1=Scanning Wi-Fi...</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Connection Status &amp; IP">
+				<listitem name="Connect to Wi-Fi Network 1">
+					<icon res="edit"/>
+					<action function="set">tw_wifi_target=%tw_wifi_net1%</action>
+					<action function="page">foxui_wifi_pass</action>
+				</listitem>
+				<listitem name="Connect to Wi-Fi Network 2">
+					<icon res="edit"/>
+					<action function="set">tw_wifi_target=%tw_wifi_net2%</action>
+					<action function="page">foxui_wifi_pass</action>
+				</listitem>
+				<listitem name="Connect to Wi-Fi Network 3">
+					<icon res="edit"/>
+					<action function="set">tw_wifi_target=%tw_wifi_net3%</action>
+					<action function="page">foxui_wifi_pass</action>
+				</listitem>
+				<listitem name="Add Hidden Wi-Fi Network">
+					<icon res="addons"/>
+					<action function="page">foxui_wifi_hidden_ssid</action>
+				</listitem>
+				<listitem name="Check Connection Status &amp; IP">
 					<icon res="info"/>
 					<action function="set">tw_back=foxui_wifi</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd wifi_status</action>
-					<action function="set">tw_action_text1=Wi-Fi Status</action>
-					<action function="set">tw_action_text2=Querying network state...</action>
-					<action function="set">tw_complete_text1=Status Retrieved</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Disconnect Wi-Fi">
+				<listitem name="Disconnect Active Wi-Fi">
 					<icon res="delete"/>
 					<action function="set">tw_back=foxui_wifi</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd wifi_disconnect</action>
-					<action function="set">tw_action_text1=Wi-Fi Disconnect</action>
-					<action function="set">tw_action_text2=Releasing wireless connection...</action>
-					<action function="set">tw_complete_text1=Disconnected</action>
 					<action function="page">action_page</action>
 				</listitem>
 			</listbox>
@@ -115,7 +126,224 @@
 			</action>
 		</page>
 
-		<!-- Subpage: Wireless ADB & scrcpy -->
+		<!-- Subpage: Enter Wi-Fi Password with Keyboard -->
+		<page name="foxui_wifi_pass">
+			<template name="base"/>
+
+			<text style="text_ab_title">
+				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
+				<text>Wi-Fi Password</text>
+			</text>
+
+			<text style="text_body2">
+				<placement x="%col1_x_caption%" y="%row1_1_y%"/>
+				<text>Enter password for network:</text>
+			</text>
+
+			<input>
+				<placement x="%col1_x_caption%" y="%row1_2_y%" w="%input_w%" h="%input_height%"/>
+				<data name="tw_wifi_password" mask="*" maskvariable="tw_wifi_password_mask"/>
+				<text>%tw_wifi_password_mask%</text>
+				<restrict minlen="0" maxlen="64"/>
+				<action function="set">tw_back=foxui_wifi</action>
+				<action function="set">tw_action=terminalcommand</action>
+				<action function="set">tw_action_param=/system/bin/foxui_cmd wifi_connect "%tw_wifi_target%" "%tw_wifi_password%"</action>
+				<action function="page">action_page</action>
+			</input>
+
+			<template name="keyboardtemplate"/>
+			<template name="gestures_key"/>
+
+			<action>
+				<touch key="home"/>
+				<action function="page">main</action>
+			</action>
+
+			<action>
+				<touch key="back"/>
+				<action function="page">foxui_wifi</action>
+			</action>
+		</page>
+
+		<!-- Subpage: Add Hidden Wi-Fi (Step 1: SSID) -->
+		<page name="foxui_wifi_hidden_ssid">
+			<template name="base"/>
+
+			<text style="text_ab_title">
+				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
+				<text>Add Hidden Wi-Fi</text>
+			</text>
+
+			<text style="text_body2">
+				<placement x="%col1_x_caption%" y="%row1_1_y%"/>
+				<text>Enter Hidden Network SSID:</text>
+			</text>
+
+			<input>
+				<placement x="%col1_x_caption%" y="%row1_2_y%" w="%input_w%" h="%input_height%"/>
+				<data name="tw_wifi_hidden_ssid"/>
+				<text>%tw_wifi_hidden_ssid%</text>
+				<restrict minlen="1" maxlen="32"/>
+				<action function="page">foxui_wifi_hidden_pass</action>
+			</input>
+
+			<template name="keyboardtemplate"/>
+			<template name="gestures_key"/>
+
+			<action>
+				<touch key="home"/>
+				<action function="page">main</action>
+			</action>
+
+			<action>
+				<touch key="back"/>
+				<action function="page">foxui_wifi</action>
+			</action>
+		</page>
+
+		<!-- Subpage: Add Hidden Wi-Fi (Step 2: Password) -->
+		<page name="foxui_wifi_hidden_pass">
+			<template name="base"/>
+
+			<text style="text_ab_title">
+				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
+				<text>Hidden Wi-Fi Password</text>
+			</text>
+
+			<text style="text_body2">
+				<placement x="%col1_x_caption%" y="%row1_1_y%"/>
+				<text>Enter Password for %tw_wifi_hidden_ssid%:</text>
+			</text>
+
+			<input>
+				<placement x="%col1_x_caption%" y="%row1_2_y%" w="%input_w%" h="%input_height%"/>
+				<data name="tw_wifi_hidden_pass" mask="*" maskvariable="tw_wifi_hidden_pass_mask"/>
+				<text>%tw_wifi_hidden_pass_mask%</text>
+				<restrict minlen="0" maxlen="64"/>
+				<action function="set">tw_back=foxui_wifi</action>
+				<action function="set">tw_action=terminalcommand</action>
+				<action function="set">tw_action_param=/system/bin/foxui_cmd wifi_connect "%tw_wifi_hidden_ssid%" "%tw_wifi_hidden_pass%"</action>
+				<action function="page">action_page</action>
+			</input>
+
+			<template name="keyboardtemplate"/>
+			<template name="gestures_key"/>
+
+			<action>
+				<touch key="home"/>
+				<action function="page">main</action>
+			</action>
+
+			<action>
+				<touch key="back"/>
+				<action function="page">foxui_wifi_hidden_ssid</action>
+			</action>
+		</page>
+
+		<!-- Subpage: In-RAM Linux Container Manager -->
+		<page name="foxui_containers">
+			<template name="base"/>
+
+			<text style="text_ab_title">
+				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
+				<text>In-RAM Container Manager</text>
+			</text>
+
+			<listbox style="group_list">
+				<placement x="0" y="%ab_h%" w="%screen_w%" h="%files_np_w%"/>
+				<!-- Debian ARM64 Container -->
+				<listitem name="Start Debian 12 Bookworm Container">
+					<icon res="cube"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_start debian</action>
+					<action function="page">action_page</action>
+				</listitem>
+				<listitem name="Connect to Debian Terminal">
+					<icon res="edit"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_term debian</action>
+					<action function="page">action_page</action>
+				</listitem>
+				<listitem name="Stop Debian Container">
+					<icon res="delete"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_stop debian</action>
+					<action function="page">action_page</action>
+				</listitem>
+
+				<!-- Alpine Linux Container -->
+				<listitem name="Start Alpine Minimal Rescue Container">
+					<icon res="cube"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_start alpine</action>
+					<action function="page">action_page</action>
+				</listitem>
+				<listitem name="Connect to Alpine Terminal">
+					<icon res="edit"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_term alpine</action>
+					<action function="page">action_page</action>
+				</listitem>
+				<listitem name="Stop Alpine Container">
+					<icon res="delete"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_stop alpine</action>
+					<action function="page">action_page</action>
+				</listitem>
+
+				<!-- Arch Linux ARM Container -->
+				<listitem name="Start Arch Linux ARM Container">
+					<icon res="cube"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_start arch</action>
+					<action function="page">action_page</action>
+				</listitem>
+				<listitem name="Connect to Arch Terminal">
+					<icon res="edit"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_term arch</action>
+					<action function="page">action_page</action>
+				</listitem>
+				<listitem name="Stop Arch Container">
+					<icon res="delete"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_stop arch</action>
+					<action function="page">action_page</action>
+				</listitem>
+
+				<!-- Container Installer -->
+				<listitem name="Download &amp; Install Rootfs Packages">
+					<icon res="addons"/>
+					<action function="set">tw_back=foxui_containers</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd container_install debian</action>
+					<action function="page">action_page</action>
+				</listitem>
+			</listbox>
+
+			<template name="gestures"/>
+
+			<action>
+				<touch key="home"/>
+				<action function="page">main</action>
+			</action>
+
+			<action>
+				<touch key="back"/>
+				<action function="page">foxui_dashboard</action>
+			</action>
+		</page>
+
+		<!-- Subpage: Wireless ADB & scrcpy Server -->
 		<page name="foxui_adb">
 			<template name="base"/>
 
@@ -126,24 +354,18 @@
 
 			<listbox style="group_list">
 				<placement x="0" y="%ab_h%" w="%screen_w%" h="%files_np_w%"/>
-				<listitem name="Start Wireless ADB (Port 5555)">
+				<listitem name="Start Wireless ADB Daemon (Port 5555)">
 					<icon res="devices"/>
 					<action function="set">tw_back=foxui_adb</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd wireless_adb</action>
-					<action function="set">tw_action_text1=Wireless ADB</action>
-					<action function="set">tw_action_text2=Starting TCP daemon on port 5555...</action>
-					<action function="set">tw_complete_text1=Wireless ADB Active</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Native scrcpy Screen Mirror Info">
-					<icon res="mobile"/>
+				<listitem name="PC Display Mirroring Guide">
+					<icon res="info"/>
 					<action function="set">tw_back=foxui_adb</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd scrcpy_server</action>
-					<action function="set">tw_action_text1=Recovery scrcpy</action>
-					<action function="set">tw_action_text2=Querying scrcpy server status...</action>
-					<action function="set">tw_complete_text1=Ready for PC Connection</action>
 					<action function="page">action_page</action>
 				</listitem>
 			</listbox>
@@ -167,29 +389,23 @@
 
 			<text style="text_ab_title">
 				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
-				<text>Flashlight HAL</text>
+				<text>Flashlight HAL (S2MU004)</text>
 			</text>
 
 			<listbox style="group_list">
 				<placement x="0" y="%ab_h%" w="%screen_w%" h="%files_np_w%"/>
-				<listitem name="Toggle Flashlight (Level 5 / 125 mA)">
+				<listitem name="Toggle Flashlight LED (Level 5)">
 					<icon res="bolt"/>
 					<action function="set">tw_back=foxui_torch</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd torch_toggle</action>
-					<action function="set">tw_action_text1=Flashlight HAL</action>
-					<action function="set">tw_action_text2=Toggling rear flash...</action>
-					<action function="set">tw_complete_text1=Flashlight State Changed</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Maximum Torch (Level 10 / 250 mA)">
+				<listitem name="Flashlight Maximum Brightness (Level 10)">
 					<icon res="bolt"/>
 					<action function="set">tw_back=foxui_torch</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd torch_max</action>
-					<action function="set">tw_action_text1=Max Flashlight</action>
-					<action function="set">tw_action_text2=Setting maximum brightness...</action>
-					<action function="set">tw_complete_text1=Max Torch Active</action>
 					<action function="page">action_page</action>
 				</listitem>
 				<listitem name="Turn Flashlight OFF">
@@ -197,9 +413,6 @@
 					<action function="set">tw_back=foxui_torch</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd torch_off</action>
-					<action function="set">tw_action_text1=Flashlight OFF</action>
-					<action function="set">tw_action_text2=Extinguishing rear flash...</action>
-					<action function="set">tw_complete_text1=Flashlight OFF</action>
 					<action function="page">action_page</action>
 				</listitem>
 			</listbox>
@@ -217,65 +430,50 @@
 			</action>
 		</page>
 
-		<!-- Subpage: Unified Root Suite -->
+		<!-- Subpage: Unified Root Management Suite -->
 		<page name="foxui_root">
 			<template name="base"/>
 
 			<text style="text_ab_title">
 				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
-				<text>Root Suite</text>
+				<text>Unified Root Suite</text>
 			</text>
 
 			<listbox style="group_list">
 				<placement x="0" y="%ab_h%" w="%screen_w%" h="%files_np_w%"/>
-				<listitem name="Detect Installed Root Solutions">
-					<icon res="shield_toggle"/>
+				<listitem name="Inspect Root Solutions (Magisk/KSU/APatch)">
+					<icon res="info"/>
 					<action function="set">tw_back=foxui_root</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd root_detect</action>
-					<action function="set">tw_action_text1=Root Detection</action>
-					<action function="set">tw_action_text2=Inspecting BOOT and data...</action>
-					<action function="set">tw_complete_text1=Inspection Complete</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Surgical Uninstall Magisk / Kitsune">
-					<icon res="wand_shine"/>
+				<listitem name="Surgically Uninstall Magisk">
+					<icon res="delete"/>
 					<action function="set">tw_back=foxui_root</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd root_uninstall_magisk</action>
-					<action function="set">tw_action_text1=Uninstall Magisk</action>
-					<action function="set">tw_action_text2=Removing Magisk traces...</action>
-					<action function="set">tw_complete_text1=Magisk Uninstalled</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Surgical Uninstall KernelSU / Next">
-					<icon res="hard_disk"/>
+				<listitem name="Surgically Uninstall KernelSU">
+					<icon res="delete"/>
 					<action function="set">tw_back=foxui_root</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd root_uninstall_ksu</action>
-					<action function="set">tw_action_text1=Uninstall KernelSU</action>
-					<action function="set">tw_action_text2=Purging KernelSU binaries...</action>
-					<action function="set">tw_complete_text1=KernelSU Removed</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Surgical Uninstall APatch">
-					<icon res="build"/>
+				<listitem name="Surgically Uninstall APatch">
+					<icon res="delete"/>
 					<action function="set">tw_back=foxui_root</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd root_uninstall_apatch</action>
-					<action function="set">tw_action_text1=Uninstall APatch</action>
-					<action function="set">tw_action_text2=Purging APatch binaries...</action>
-					<action function="set">tw_complete_text1=APatch Removed</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Update Play Integrity Fingerprint">
-					<icon res="edit"/>
+				<listitem name="Apply Certified Play Integrity Profile">
+					<icon res="shield_toggle"/>
 					<action function="set">tw_back=foxui_root</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd play_integrity_fix</action>
-					<action function="set">tw_action_text1=Play Integrity Fix</action>
-					<action function="set">tw_action_text2=Writing certified M205F profile...</action>
-					<action function="set">tw_complete_text1=Fingerprint Written</action>
 					<action function="page">action_page</action>
 				</listitem>
 			</listbox>
@@ -304,24 +502,18 @@
 
 			<listbox style="group_list">
 				<placement x="0" y="%ab_h%" w="%screen_w%" h="%files_np_w%"/>
-				<listitem name="Backup EFS &amp; Baseband Golden Vault">
+				<listitem name="Backup EFS, CPEFS &amp; RADIO Vault">
 					<icon res="backup"/>
 					<action function="set">tw_back=foxui_efs</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd efs_backup</action>
-					<action function="set">tw_action_text1=EFS Golden Vault</action>
-					<action function="set">tw_action_text2=Dumping EFS, CPEFS, and RADIO...</action>
-					<action function="set">tw_complete_text1=EFS Vault Backed Up</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Heal EFS &amp; Baseband Permissions">
-					<icon res="reset_wrench"/>
+				<listitem name="Restore Radio &amp; EFS Permissions (1001:1001)">
+					<icon res="build"/>
 					<action function="set">tw_back=foxui_efs</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd efs_restore_perm</action>
-					<action function="set">tw_action_text1=Restore EFS Permissions</action>
-					<action function="set">tw_action_text2=Fixing radio:radio ownership &amp; SELinux...</action>
-					<action function="set">tw_complete_text1=EFS Restored</action>
 					<action function="page">action_page</action>
 				</listitem>
 			</listbox>
@@ -339,81 +531,36 @@
 			</action>
 		</page>
 
-		<!-- Subpage: Debloater & System Tools -->
+		<!-- Subpage: OneUI Debloater & System Cleaner -->
 		<page name="foxui_debloat">
 			<template name="base"/>
 
 			<text style="text_ab_title">
 				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
-				<text>Debloater &amp; Cleaner</text>
+				<text>OneUI Debloat &amp; Clean</text>
 			</text>
 
 			<listbox style="group_list">
 				<placement x="0" y="%ab_h%" w="%screen_w%" h="%files_np_w%"/>
-				<listitem name="One-Tap OneUI &amp; Samsung Debloater">
-					<icon res="mobile_wrench"/>
-					<action function="set">tw_back=foxui_debloat</action>
-					<action function="set">tw_action=terminalcommand</action>
-					<action function="set">tw_action_param=/system/bin/foxui_cmd debloat_oneui</action>
-					<action function="set">tw_action_text1=OneUI Debloater</action>
-					<action function="set">tw_action_text2=Removing Knox, Bixby, and bloatware...</action>
-					<action function="set">tw_complete_text1=Debloat Complete</action>
-					<action function="page">action_page</action>
-				</listitem>
-				<listitem name="Clean ART &amp; Dalvik Cache">
+				<listitem name="Neutralize OneUI Bloatware (Knox/Bixby/Pay)">
 					<icon res="delete"/>
 					<action function="set">tw_back=foxui_debloat</action>
 					<action function="set">tw_action=terminalcommand</action>
-					<action function="set">tw_action_param=/system/bin/foxui_cmd clean_cache</action>
-					<action function="set">tw_action_text1=Clean Cache</action>
-					<action function="set">tw_action_text2=Purging dalvik-cache and package_cache...</action>
-					<action function="set">tw_complete_text1=Cache Cleaned</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd debloat_oneui</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Reset Lockscreen PIN / Pattern">
+				<listitem name="Purge Dalvik &amp; ART Cache">
+					<icon res="reset_wrench"/>
+					<action function="set">tw_back=foxui_debloat</action>
+					<action function="set">tw_action=terminalcommand</action>
+					<action function="set">tw_action_param=/system/bin/foxui_cmd clean_cache</action>
+					<action function="page">action_page</action>
+				</listitem>
+				<listitem name="Reset Lockscreen Credentials (PIN/Pattern)">
 					<icon res="key"/>
 					<action function="set">tw_back=foxui_debloat</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd reset_lockscreen</action>
-					<action function="set">tw_action_text1=Reset Lockscreen</action>
-					<action function="set">tw_action_text2=Clearing gatekeeper and lock credentials...</action>
-					<action function="set">tw_complete_text1=Lockscreen Cleared</action>
-					<action function="page">action_page</action>
-				</listitem>
-			</listbox>
-
-			<template name="gestures"/>
-
-			<action>
-				<touch key="home"/>
-				<action function="page">main</action>
-			</action>
-
-			<action>
-				<touch key="back"/>
-				<action function="page">foxui_dashboard</action>
-			</action>
-		</page>
-
-		<!-- Subpage: In-RAM Ephemeral Containers -->
-		<page name="foxui_container">
-			<template name="base"/>
-
-			<text style="text_ab_title">
-				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
-				<text>In-RAM Containers</text>
-			</text>
-
-			<listbox style="group_list">
-				<placement x="0" y="%ab_h%" w="%screen_w%" h="%files_np_w%"/>
-				<listitem name="Start In-RAM Alpine Linux Container">
-					<icon res="cube"/>
-					<action function="set">tw_back=foxui_container</action>
-					<action function="set">tw_action=terminalcommand</action>
-					<action function="set">tw_action_param=/system/bin/foxui_cmd container_start</action>
-					<action function="set">tw_action_text1=Alpine Container</action>
-					<action function="set">tw_action_text2=Launching ephemeral RAM runtime...</action>
-					<action function="set">tw_complete_text1=Container Active</action>
 					<action function="page">action_page</action>
 				</listitem>
 			</listbox>
@@ -437,29 +584,23 @@
 
 			<text style="text_ab_title">
 				<placement x="%col1_x_indent%" y="%ab_bc_y%"/>
-				<text>Security &amp; Boot Patcher</text>
+				<text>Samsung Boot Patcher</text>
 			</text>
 
 			<listbox style="group_list">
 				<placement x="0" y="%ab_h%" w="%screen_w%" h="%files_np_w%"/>
-				<listitem name="Remove Bootloader Warning Splash">
+				<listitem name="Remove Unlocked Bootloader Warning">
 					<icon res="boot_splash"/>
 					<action function="set">tw_back=foxui_patcher</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd remove_boot_warning</action>
-					<action function="set">tw_action_text1=UP_PARAM Patcher</action>
-					<action function="set">tw_action_text2=Neutralizing warning screens...</action>
-					<action function="set">tw_complete_text1=Warning Splash Removed</action>
 					<action function="page">action_page</action>
 				</listitem>
-				<listitem name="Disable ForceEncrypt &amp; DM-Verity">
-					<icon res="chip"/>
+				<listitem name="Neutralize ForceEncrypt &amp; DM-Verity">
+					<icon res="shield_toggle"/>
 					<action function="set">tw_back=foxui_patcher</action>
 					<action function="set">tw_action=terminalcommand</action>
 					<action function="set">tw_action_param=/system/bin/foxui_cmd patch_security</action>
-					<action function="set">tw_action_text1=Security Patcher</action>
-					<action function="set">tw_action_text2=Patching vendor fstab...</action>
-					<action function="set">tw_complete_text1=Security Patched</action>
 					<action function="page">action_page</action>
 				</listitem>
 			</listbox>

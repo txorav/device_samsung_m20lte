@@ -46,6 +46,16 @@ on boot
     # Wi-Fi / rfkill
     chmod 0666 /sys/class/rfkill/rfkill0/state
 
+    # CPU governor performance boost (prevents 10s decryption timeout)
+    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu4/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu5/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu6/cpufreq/scaling_governor performance
+    write /sys/devices/system/cpu/cpu7/cpufreq/scaling_governor performance
+
     # FoxUI Remote scrcpy shim symlinks
     symlink /system/bin/foxd /system/bin/app_process
     symlink /system/bin/foxd /sbin/app_process

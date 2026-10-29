@@ -15,7 +15,7 @@
 			<listbox style="group_list">
 				<placement x="0" y="%row1_1a_y%" w="%screen_w%" h="%files_np_w%"/>
 				<listitem name="{@mount_btn}">
-					<icon res="mount_list"/>
+					<icon res="hard_disk"/>
 					<action function="page">mount</action>
 				</listitem>
 				<listitem name="{@partitions_management}">
@@ -81,7 +81,7 @@
 				</listitem>
 				<listitem name="{@ap_modules}">
 					<condition var1="fileexists" var2="%ap_path%"/>
-					<icon res="android"/>
+					<icon res="apatch"/>
 					<action function="set">rmm_found=-1</action>
 					<action function="set">rmm_type=ap</action>
 					<action function="page">modules_mount</action>
@@ -100,7 +100,7 @@
 				</listitem>
 				<listitem name="{@appmgr_title}">
 					<condition var1="enable_app_manager" var2="1"/>
-					<icon res="apps_box"/>
+					<icon res="apps"/>
 					<action function="page">apps_load</action>
 				</listitem>
 				<listitem name="{@copy_log_btn}">
