@@ -48,11 +48,13 @@ env:
   FOX_BUILD_DEVICE: 'm20lte'
   OF_MAINTAINER: 'txorav'
   CCACHE_DIR: '${{ github.workspace }}/.ccache'
+  BUILDBUDDY_API_KEY: 'd5Z9d6ry3bwzvdX4AVVc'
+  RBE_REMOTE_HEADERS: 'x-buildbuddy-api-key=d5Z9d6ry3bwzvdX4AVVc'
 
 jobs:
   build:
     name: Build OrangeFox Recovery for Samsung Galaxy M20 (m20lte)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
 
     steps:
