@@ -39,6 +39,8 @@ env:
   AERA_BRANCH: ${{ github.event.inputs.aera_branch || 'aera-16.0' }}
   WORK: '/home/runner/aera'
   DEVICE: 'm20lte'
+  BUILDBUDDY_API_KEY: 'd5Z9d6ry3bwzvdX4AVVc'
+  RBE_REMOTE_HEADERS: 'x-buildbuddy-api-key=d5Z9d6ry3bwzvdX4AVVc'
 
 jobs:
   build:
