@@ -15,6 +15,10 @@ on:
         description: 'OrangeFox sync branch'
         required: false
         default: '12.1'
+      flavor:
+        description: 'Recovery flavor (auto, vanilla, standard)'
+        required: false
+        default: 'auto'
       jobs:
         description: 'Parallel make jobs'
         required: false
@@ -191,6 +195,26 @@ jobs:
           find "$SRC_DIR/.repo/project-objects" -type d -name '*.git' -prune -exec rm -rf {} + 2>/dev/null || true
           df -h /
 
+      - name: Determine Build Flavor
+        id: flavor
+        run: |
+          REF_NAME="${{ github.ref_name }}"
+          FLAVOR_INPUT="${{ inputs.flavor || 'auto' }}"
+
+          if [ "$FLAVOR_INPUT" = "vanilla" ] || { [ "$FLAVOR_INPUT" = "auto" ] && [[ "$REF_NAME" == *"vanilla"* ]]; }; then
+            echo "Flavor: Vanilla"
+            echo "prefix=OrangeFox-Vanilla-m20lte" >> $GITHUB_OUTPUT
+            echo "flavor_label=OrangeFox Recovery 12.1 (Vanilla)" >> $GITHUB_OUTPUT
+            echo "ak3_zip=OrangeFox-R12.1-Vanilla-m20lte-AnyKernel3.zip" >> $GITHUB_OUTPUT
+            echo "is_vanilla=1" >> $GITHUB_OUTPUT
+          else
+            echo "Flavor: Standard"
+            echo "prefix=OrangeFox-Standard-m20lte" >> $GITHUB_OUTPUT
+            echo "flavor_label=OrangeFox Recovery 12.1 (Standard)" >> $GITHUB_OUTPUT
+            echo "ak3_zip=OrangeFox-R12.1-Standard-m20lte-AnyKernel3.zip" >> $GITHUB_OUTPUT
+            echo "is_vanilla=0" >> $GITHUB_OUTPUT
+          fi
+
       - name: Compile OrangeFox
         env:
           USE_CCACHE: ${{ inputs.ccache || 'true' }}
@@ -208,6 +232,16 @@ jobs:
           cd "$SRC_DIR"
           unset FOX_VERSION
           export FOX_MAINTAINER_PATCH_VERSION="1"
+
+          if [ "${{ steps.flavor.outputs.is_vanilla }}" = "1" ]; then
+            export FOX_VANILLA_BUILD=1
+            export OF_VANILLA_BUILD=1
+            echo "=== Compiling OrangeFox Recovery (Vanilla Edition) ==="
+          else
+            export FOX_VANILLA_BUILD=0
+            export OF_VANILLA_BUILD=0
+            echo "=== Compiling OrangeFox Recovery (Standard Edition) ==="
+          fi
 
           python3 "$GITHUB_WORKSPACE/device_repo/scripts/opencode_agent.py" supervise \
             --work-dir "$GITHUB_WORKSPACE/$SRC_DIR" \
@@ -246,7 +280,7 @@ jobs:
 
             # 4. Package AnyKernel3 recovery flashable zip
             echo "Building AnyKernel3 recovery installer zip..."
-            bash device_repo/scripts/make_anykernel3.sh "$OUT_DIR" "OrangeFox Recovery 12.1" "OrangeFox-R12.1-m20lte-AnyKernel3.zip" || true
+            bash device_repo/scripts/make_anykernel3.sh "$OUT_DIR" "${{ steps.flavor.outputs.flavor_label }}" "${{ steps.flavor.outputs.ak3_zip }}" || true
             cd "$GITHUB_WORKSPACE"
           fi
           ls -lh "$OUT_DIR"
@@ -259,23 +293,54 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: orangefox-m20lte-build-log
+          name: ${{ steps.flavor.outputs.prefix }}-build-logs
           path: |
             ${{ env.SRC_DIR }}/build.log
             ${{ env.SRC_DIR }}/opencode_agent_actions.log
           if-no-files-found: ignore
 
-      - name: Upload recovery artifacts
+      - name: Upload raw recovery.img (fastboot / dd)
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: orangefox-m20lte-recovery-${{ github.ref_name }}
+          name: ${{ steps.flavor.outputs.prefix }}-recovery-img
           path: |
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.zip
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.md5
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.sha256
-            ${{ env.SRC_DIR }}/out/target/product/m20lte/*.tar
             ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.img
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.img.md5
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.img.sha256
+          if-no-files-found: error
+
+      - name: Upload Samsung Odin tar package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.flavor.outputs.prefix }}-odin-tar
+          path: |
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.tar
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/recovery.tar.md5
+          if-no-files-found: error
+
+      - name: Upload recovery flashable installer zip
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.flavor.outputs.prefix }}-installer-zip
+          path: |
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/OrangeFox-*.zip
+            !${{ env.SRC_DIR }}/out/target/product/m20lte/*AnyKernel3*.zip
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/OrangeFox-*.zip.md5
+            !${{ env.SRC_DIR }}/out/target/product/m20lte/*AnyKernel3*.zip.md5
+          if-no-files-found: warn
+
+      - name: Upload AnyKernel3 recovery installer zip
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.flavor.outputs.prefix }}-anykernel3-zip
+          path: |
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*AnyKernel3*.zip
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*AnyKernel3*.zip.md5
+            ${{ env.SRC_DIR }}/out/target/product/m20lte/*AnyKernel3*.zip.sha256
           if-no-files-found: warn
 
       - name: Create GitHub Release
@@ -298,7 +363,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: '8477945979:AAGTYiUAfnPjQFpkh576D7Xsqm0RDQJr_As'
           TELEGRAM_CHAT_ID: '8198896729'
           JOB_STATUS: ${{ job.status }}
-          RECOVERY_FLAVOR: 'OrangeFox'
+          RECOVERY_FLAVOR: ${{ steps.flavor.outputs.flavor_label }}
         run: |
           python3 - << 'EOF'
           import os, glob, hashlib, json, subprocess, urllib.request

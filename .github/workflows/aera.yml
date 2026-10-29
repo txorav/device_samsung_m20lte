@@ -217,25 +217,58 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aera-m20lte-build-logs
+          name: AERA-16.0-m20lte-build-logs
           path: |
             build.log
             lunch.log
             sync.log
             opencode_agent_actions.log
+            ${{ env.WORK }}/build.log
+            ${{ env.WORK }}/opencode_agent_actions.log
           if-no-files-found: ignore
 
-      - name: Upload recovery artifacts
+      - name: Upload raw recovery.img (fastboot / dd)
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: aera-m20lte-recovery
+          name: AERA-16.0-m20lte-recovery-img
           path: |
-            ${{ env.WORK }}/out/target/product/m20lte/*.zip
-            ${{ env.WORK }}/out/target/product/m20lte/*.md5
-            ${{ env.WORK }}/out/target/product/m20lte/*.sha256
-            ${{ env.WORK }}/out/target/product/m20lte/*.tar
             ${{ env.WORK }}/out/target/product/m20lte/recovery.img
+            ${{ env.WORK }}/out/target/product/m20lte/recovery.img.md5
+            ${{ env.WORK }}/out/target/product/m20lte/recovery.img.sha256
+          if-no-files-found: error
+
+      - name: Upload Samsung Odin tar package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AERA-16.0-m20lte-odin-tar
+          path: |
+            ${{ env.WORK }}/out/target/product/m20lte/recovery.tar
+            ${{ env.WORK }}/out/target/product/m20lte/recovery.tar.md5
+          if-no-files-found: error
+
+      - name: Upload recovery flashable installer zip
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AERA-16.0-m20lte-installer-zip
+          path: |
+            ${{ env.WORK }}/out/target/product/m20lte/AERA-*.zip
+            !${{ env.WORK }}/out/target/product/m20lte/*AnyKernel3*.zip
+            ${{ env.WORK }}/out/target/product/m20lte/AERA-*.zip.md5
+            !${{ env.WORK }}/out/target/product/m20lte/*AnyKernel3*.zip.md5
+          if-no-files-found: warn
+
+      - name: Upload AnyKernel3 recovery installer zip
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AERA-16.0-m20lte-anykernel3-zip
+          path: |
+            ${{ env.WORK }}/out/target/product/m20lte/*AnyKernel3*.zip
+            ${{ env.WORK }}/out/target/product/m20lte/*AnyKernel3*.zip.md5
+            ${{ env.WORK }}/out/target/product/m20lte/*AnyKernel3*.zip.sha256
           if-no-files-found: warn
 
       - name: Create GitHub Release
