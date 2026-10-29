@@ -31,6 +31,7 @@ on:
   push:
     branches:
       - fox_12.1
+      - fox_12.1-vanilla
       - fox_11.0
       - main
     tags:
@@ -269,7 +270,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: orangefox-m20lte-recovery
+          name: orangefox-m20lte-recovery-${{ github.ref_name }}
           path: |
             ${{ env.SRC_DIR }}/out/target/product/m20lte/*.zip
             ${{ env.SRC_DIR }}/out/target/product/m20lte/*.md5
