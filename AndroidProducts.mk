@@ -21,9 +21,3 @@ PRODUCT_MAKEFILES := \
 
 COMMON_LUNCH_CHOICES := \
     twrp_m20lte-userdebug
-
-# Android 14+ / AERA 16.0 release configuration
-ifneq ($(filter bp2a%,$(TARGET_RELEASE)),)
-COMMON_LUNCH_CHOICES += \
-    twrp_m20lte-bp2a-userdebug
-endif
