@@ -39,8 +39,6 @@ env:
   AERA_BRANCH: ${{ github.event.inputs.aera_branch || 'aera-16.0' }}
   WORK: '/home/runner/aera'
   DEVICE: 'm20lte'
-  BUILDBUDDY_API_KEY: 'd5Z9d6ry3bwzvdX4AVVc'
-  RBE_REMOTE_HEADERS: 'x-buildbuddy-api-key=d5Z9d6ry3bwzvdX4AVVc'
 
 jobs:
   build:
@@ -145,7 +143,7 @@ jobs:
           grep -rl --include='*.mk' 'tools/compatibility.mk' build/make/core/tasks test tools 2>/dev/null | tee /tmp/compat_users.txt | xargs -r rm -f || true
           ( cd build/make/core/tasks && rm -fv catbox.mk csuite.mk cts*.mk mcts.mk mts.mk sts.mk wvts.mk dts.mk vts-core-tests.mk \
               prebuilt_tradefed.mk tradefed-tests-list.mk general-tests.mk host-unit-tests.mk device-tests.mk art-host-tests.mk \
-              automotive-*.mk performance-tests.mk device-platinum-tests.mk berberis_test.mk ) || true
+              automotive-*.mk performance-tests.mk device-platinum-tests.mk berberis_test.mk dex_preopt_check.mk ) || true
 
       - name: Compile AERA Recovery
         working-directory: ${{ env.WORK }}

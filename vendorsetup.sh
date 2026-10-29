@@ -78,8 +78,8 @@ if [ "$1" = "$FDEVICE" -o "$AERA_BUILD_DEVICE" = "$FDEVICE" -o "$FOX_BUILD_DEVIC
 	export OF_DEVICE_WITHOUT_PERSIST=1
 	export AERA_SKIP_FBE_DECRYPTION=1
 	export OF_SKIP_FBE_DECRYPTION=1
-	export AERA_USE_LZMA_COMPRESSION="0"
-	export OF_USE_LZMA_COMPRESSION="0"
+	export AERA_USE_LZMA_COMPRESSION="1"
+	export OF_USE_LZMA_COMPRESSION="1"
 
 	# Screen Settings (1080 x 2340 FHD+ Infinity-V display)
 	export AERA_SCREEN_H=2340
@@ -140,22 +140,6 @@ if [ "$1" = "$FDEVICE" -o "$AERA_BUILD_DEVICE" = "$FDEVICE" -o "$FOX_BUILD_DEVIC
 	export AERA_NO_SAMSUNG_SPECIAL=0
 	export OF_NO_SAMSUNG_SPECIAL=0
 	export BOARD_HAS_DOWNLOAD_MODE=true
-
-	# BuildBuddy RBE (Remote Build Execution & Cache)
-	export BUILDBUDDY_API_KEY="${BUILDBUDDY_API_KEY:-d5Z9d6ry3bwzvdX4AVVc}"
-	if [ -n "$BUILDBUDDY_API_KEY" ]; then
-		export USE_RBE="true"
-		export RBE_service="remote.buildbuddy.io:443"
-		export RBE_remote_headers="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
-		export RBE_use_rpc_credentials="false"
-		export RBE_CXX_EXEC_STRATEGY="remote_local_fallback"
-		export RBE_JAVAC_EXEC_STRATEGY="remote_local_fallback"
-		export RBE_R8_EXEC_STRATEGY="remote_local_fallback"
-		export RBE_D8_EXEC_STRATEGY="remote_local_fallback"
-		if [ -d "$ANDROID_BUILD_TOP/prebuilts/remoteexecution-client/latest" ]; then
-			export RBE_DIR="$ANDROID_BUILD_TOP/prebuilts/remoteexecution-client/latest"
-		fi
-	fi
 
 	# Magisk setup
 	function download_magisk(){
