@@ -427,8 +427,8 @@ class OpencodeAgent:
 
         self.log("Detected out/.lock collision", level="ACTION")
         try:
-            subprocess.run(["pkill", "-9", "-f", "soong_ui"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["pkill", "-9", "-f", "ninja"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-9", "-x", "soong_ui"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-9", "-x", "ninja"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
@@ -590,12 +590,6 @@ class OpencodeAgent:
 
         for attempt in range(1, max_retries + 1):
             self.log(f"--- Compilation Attempt {attempt} of {max_retries} ---", level="INFO")
-
-            # Kill any lingering background compilers or ninja processes
-            try:
-                subprocess.run(["pkill", "-9", "-f", "ninja|soong_ui|mka"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
 
             # Clear any stale soong lock file from previous attempts or background workers
             lock_path = self.work_dir / "out" / ".lock"
