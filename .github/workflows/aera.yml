@@ -97,6 +97,14 @@ jobs:
           git config --global color.ui false
           java -version 2>&1
 
+      - name: Install OpenCode Agent CLI
+        run: |
+          curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path || true
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+          if [ -f "$HOME/.opencode/bin/opencode" ]; then
+            "$HOME/.opencode/bin/opencode" --version || true
+          fi
+
       - name: Sync AERA sources
         working-directory: ${{ env.WORK }}
         run: |
@@ -156,31 +164,13 @@ jobs:
           LC_ALL: 'C'
           TW_DEVICE_VERSION: 'aera'
         run: |
-          set -o pipefail
-          source build/envsetup.sh
-          
-          # Lunch must succeed; auto-strip obsolete board variables (logged) and retry
-          for i in 1 2 3 4 5; do
-            lunch "$MAKEFILE_NAME" > "$GITHUB_WORKSPACE/lunch.log" 2>&1
-            rc=$?
-            if [ $rc -ne 0 ]; then
-              lunch twrp_m20lte bp2a userdebug >> "$GITHUB_WORKSPACE/lunch.log" 2>&1
-              rc=$?
-            fi
-            if [ $rc -ne 0 ]; then
-              lunch twrp_m20lte-userdebug >> "$GITHUB_WORKSPACE/lunch.log" 2>&1
-              rc=$?
-            fi
-            cat "$GITHUB_WORKSPACE/lunch.log"
-            [ $rc -eq 0 ] && grep -q '^TARGET_PRODUCT=twrp_m20lte' "$GITHUB_WORKSPACE/lunch.log" && break
-            v=$(grep -oE '[A-Z0-9_]+ is obsolete' "$GITHUB_WORKSPACE/lunch.log" | head -1 | cut -d' ' -f1)
-            [ -z "$v" ] && { echo "Lunch failed without obsolete variable"; exit 1; }
-            echo "Stripping obsolete variable $v from device tree..." | tee -a "$GITHUB_WORKSPACE/lunch.log"
-            sed -i "/^$v[ :+?]*=/d" device/samsung/m20lte/*.mk
-          done
-          grep -q '^TARGET_PRODUCT=twrp_m20lte' "$GITHUB_WORKSPACE/lunch.log" || { echo "lunch never succeeded"; exit 1; }
-          
-          mka -j"$BUILD_JOBS" adbd $BUILD_TARGET 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
+          python3 "$GITHUB_WORKSPACE/device_repo/scripts/opencode_agent.py" supervise \
+            --work-dir "$WORK" \
+            --device-dir "device/samsung/m20lte" \
+            --log "$GITHUB_WORKSPACE/build.log" \
+            --actions-log "$GITHUB_WORKSPACE/opencode_agent_actions.log" \
+            --max-retries 4 \
+            --command "source build/envsetup.sh && (lunch \$MAKEFILE_NAME || lunch twrp_m20lte bp2a userdebug || lunch twrp_m20lte-userdebug) && export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE && mka -j\$BUILD_JOBS adbd \$BUILD_TARGET"
 
       - name: Package Samsung Odin Tar & Checksums
         if: success()
@@ -210,7 +200,7 @@ jobs:
           fi
           ls -lh "$OUT_DIR"
 
-      - name: Upload build logs
+      - name: Upload build logs & agent actions
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -219,6 +209,7 @@ jobs:
             build.log
             lunch.log
             sync.log
+            opencode_agent_actions.log
           if-no-files-found: ignore
 
       - name: Upload recovery artifacts
