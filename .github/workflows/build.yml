@@ -131,6 +131,14 @@ jobs:
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
 
+      - name: Install OpenCode Agent CLI
+        run: |
+          curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path || true
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+          if [ -f "$HOME/.opencode/bin/opencode" ]; then
+            "$HOME/.opencode/bin/opencode" --version || true
+          fi
+
       - name: Restore ccache
         if: ${{ (inputs.ccache || 'true') == 'true' }}
         uses: actions/cache@v4
@@ -199,30 +207,14 @@ jobs:
           cd "$SRC_DIR"
           unset FOX_VERSION
           export FOX_MAINTAINER_PATCH_VERSION="1"
-          set -o pipefail
-          : > build.log
-          set +e
-          source build/envsetup.sh >> build.log 2>&1
-          ENVSETUP_RC=$?
-          set -e
-          echo "envsetup finished with exit code ${ENVSETUP_RC}"
-          tail -n 20 build.log || true
-          if [ -z "$ANDROID_BUILD_TOP" ]; then
-            echo "::error::envsetup did not initialise ANDROID_BUILD_TOP"
-            exit 1
-          fi
 
-          set +e
-          lunch "$MAKEFILE_NAME" >> build.log 2>&1
-          LUNCH_RC=$?
-          set -e
-          tail -n 30 build.log || true
-          if [ "$LUNCH_RC" -ne 0 ] || [ -z "$TARGET_PRODUCT" ]; then
-            echo "::error::lunch failed or did not export TARGET_PRODUCT"
-            exit 1
-          fi
-          export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE
-          mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
+          python3 "$GITHUB_WORKSPACE/device_repo/scripts/opencode_agent.py" supervise \
+            --work-dir "$GITHUB_WORKSPACE/$SRC_DIR" \
+            --device-dir "device/samsung/m20lte" \
+            --log "$GITHUB_WORKSPACE/$SRC_DIR/build.log" \
+            --actions-log "$GITHUB_WORKSPACE/$SRC_DIR/opencode_agent_actions.log" \
+            --max-retries 4 \
+            --command "source build/envsetup.sh && lunch \$MAKEFILE_NAME && export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE && mka -j\$BUILD_JOBS \$BUILD_TARGET"
 
       - name: Package Odin Tar & Checksums
         if: success()
@@ -262,12 +254,14 @@ jobs:
         if: always()
         run: ccache -s || true
 
-      - name: Upload build log
+      - name: Upload build log & agent actions
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: orangefox-m20lte-build-log
-          path: ${{ env.SRC_DIR }}/build.log
+          path: |
+            ${{ env.SRC_DIR }}/build.log
+            ${{ env.SRC_DIR }}/opencode_agent_actions.log
           if-no-files-found: ignore
 
       - name: Upload recovery artifacts
