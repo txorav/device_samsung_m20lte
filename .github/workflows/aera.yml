@@ -6,7 +6,7 @@ on:
       makefile:
         description: 'Lunch target'
         required: false
-        default: 'twrp_m20lte-bp2a-eng'
+        default: 'twrp_m20lte-bp2a-userdebug'
       build_target:
         description: 'Make target'
         required: false
@@ -123,13 +123,19 @@ jobs:
           rsync -av --exclude=".git" --exclude=".github" device_repo/ "$WORK/device/samsung/m20lte/"
           ls -la "$WORK/device/samsung/m20lte"
 
-      - name: Install LineageOS mkbootimg (Samsung Exynos --dt support)
+      - name: Configure mkbootimg with Samsung Exynos --dt support
         run: |
           set -e
-          rm -rf "$WORK/system/tools/mkbootimg"
-          git clone --depth=1 -b lineage-21.0 https://github.com/LineageOS/android_system_tools_mkbootimg "$WORK/system/tools/mkbootimg" || \
-          git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_system_tools_mkbootimg "$WORK/system/tools/mkbootimg"
-          echo "LineageOS mkbootimg installed successfully."
+          echo "Configuring mkbootimg with Samsung --dt support..."
+          # Keep AERA Android 16 Android.bp intact to prevent VNDK deprecation errors.
+          # Update mkbootimg.py with --dt flag support for Samsung Exynos header v0.
+          if [ -f device_repo/scripts/mkbootimg.py ]; then
+            cp -v device_repo/scripts/mkbootimg.py "$WORK/system/tools/mkbootimg/mkbootimg.py"
+          else
+            curl -sSL "https://raw.githubusercontent.com/LineageOS/android_system_tools_mkbootimg/lineage-22.1/mkbootimg.py" -o "$WORK/system/tools/mkbootimg/mkbootimg.py"
+          fi
+          chmod +x "$WORK/system/tools/mkbootimg/mkbootimg.py"
+          grep -q -- "--dt" "$WORK/system/tools/mkbootimg/mkbootimg.py" && echo "Verified: mkbootimg.py has Samsung --dt support."
 
       - name: Clean incompatible test tasks
         working-directory: ${{ env.WORK }}
@@ -144,7 +150,7 @@ jobs:
         env:
           ALLOW_MISSING_DEPENDENCIES: 'true'
           BUILD_JOBS: ${{ inputs.jobs || '4' }}
-          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-bp2a-eng' }}
+          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-bp2a-userdebug' }}
           BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
           TARGET_RELEASE: 'bp2a'
           LC_ALL: 'C'
@@ -153,22 +159,26 @@ jobs:
           set -o pipefail
           source build/envsetup.sh
           
-          # Lunch with fallback handling
-          set +e
-          lunch "$MAKEFILE_NAME" > "$GITHUB_WORKSPACE/lunch.log" 2>&1
-          LUNCH_RC=$?
-          if [ "$LUNCH_RC" -ne 0 ]; then
-            echo "Trying alternate lunch twrp_m20lte bp2a eng..."
-            lunch twrp_m20lte bp2a eng >> "$GITHUB_WORKSPACE/lunch.log" 2>&1
-            LUNCH_RC=$?
-          fi
-          if [ "$LUNCH_RC" -ne 0 ]; then
-            echo "Trying alternate lunch twrp_m20lte-eng..."
-            lunch twrp_m20lte-eng >> "$GITHUB_WORKSPACE/lunch.log" 2>&1
-            LUNCH_RC=$?
-          fi
-          set -e
-          cat "$GITHUB_WORKSPACE/lunch.log"
+          # Lunch must succeed; auto-strip obsolete board variables (logged) and retry
+          for i in 1 2 3 4 5; do
+            lunch "$MAKEFILE_NAME" > "$GITHUB_WORKSPACE/lunch.log" 2>&1
+            rc=$?
+            if [ $rc -ne 0 ]; then
+              lunch twrp_m20lte bp2a userdebug >> "$GITHUB_WORKSPACE/lunch.log" 2>&1
+              rc=$?
+            fi
+            if [ $rc -ne 0 ]; then
+              lunch twrp_m20lte-userdebug >> "$GITHUB_WORKSPACE/lunch.log" 2>&1
+              rc=$?
+            fi
+            cat "$GITHUB_WORKSPACE/lunch.log"
+            [ $rc -eq 0 ] && grep -q '^TARGET_PRODUCT=twrp_m20lte' "$GITHUB_WORKSPACE/lunch.log" && break
+            v=$(grep -oE '[A-Z0-9_]+ is obsolete' "$GITHUB_WORKSPACE/lunch.log" | head -1 | cut -d' ' -f1)
+            [ -z "$v" ] && { echo "Lunch failed without obsolete variable"; exit 1; }
+            echo "Stripping obsolete variable $v from device tree..." | tee -a "$GITHUB_WORKSPACE/lunch.log"
+            sed -i "/^$v[ :+?]*=/d" device/samsung/m20lte/*.mk
+          done
+          grep -q '^TARGET_PRODUCT=twrp_m20lte' "$GITHUB_WORKSPACE/lunch.log" || { echo "lunch never succeeded"; exit 1; }
           
           mka -j"$BUILD_JOBS" adbd $BUILD_TARGET 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
 

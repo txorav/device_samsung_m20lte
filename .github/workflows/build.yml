@@ -6,7 +6,7 @@ on:
       makefile:
         description: 'Lunch target'
         required: false
-        default: 'twrp_m20lte-eng'
+        default: 'twrp_m20lte-userdebug'
       build_target:
         description: 'Make target'
         required: false
@@ -65,7 +65,7 @@ jobs:
       - name: Show parameters & environment
         run: |
           echo "OrangeFox Sync : $FOX_SYNC_URL @ $FOX_SYNC_BRANCH"
-          echo "Lunch target   : ${{ inputs.makefile || 'twrp_m20lte-eng' }}"
+          echo "Lunch target   : ${{ inputs.makefile || 'twrp_m20lte-userdebug' }}"
           echo "Build target   : ${{ inputs.build_target || 'recoveryimage' }}"
           echo "Jobs           : ${{ inputs.jobs || '4' }}"
           echo "Free disk space before:"
@@ -188,7 +188,7 @@ jobs:
           USE_CCACHE: ${{ inputs.ccache || 'true' }}
           ALLOW_MISSING_DEPENDENCIES: 'true'
           BUILD_JOBS: ${{ inputs.jobs || '4' }}
-          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-eng' }}
+          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-userdebug' }}
           BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
           BUILD_USERNAME: ${{ github.actor }}
           BUILD_HOSTNAME: ofox-builder
