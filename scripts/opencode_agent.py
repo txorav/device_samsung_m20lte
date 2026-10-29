@@ -377,6 +377,30 @@ class OpencodeAgent:
             return desc
         return False
 
+    def fix_stale_out_lock(self, log_content):
+        """Cleans up stale out/.lock and terminates orphaned build processes."""
+        if "out/.lock" not in log_content:
+            return False
+
+        self.log("Detected out/.lock collision", level="ACTION")
+        try:
+            subprocess.run(["pkill", "-9", "-f", "soong_ui"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-9", "-f", "ninja"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        lock_path = self.work_dir / "out" / ".lock"
+        if lock_path.exists():
+            try:
+                lock_path.unlink()
+            except Exception as e:
+                self.log(f"Failed unlinking out/.lock: {e}", level="WARNING")
+
+        desc = "Terminated orphaned soong/ninja processes and removed out/.lock"
+        self.log(f"Remediation: {desc}", level="SUCCESS")
+        return desc
+
+
     def run_opencode_cli_fallback(self, log_content):
         """Invokes opencode CLI with failure context if installed."""
         opencode_paths = [
@@ -445,6 +469,7 @@ class OpencodeAgent:
             ("Sandboxing NSJAIL Environment Config", self.fix_sandbox_nsjail),
             ("Mkbootimg Samsung Exynos --dt Patch", self.fix_mkbootimg_dt_argument),
             ("Missing Host Tools Resolution", self.fix_missing_host_command),
+            ("Stale Output Lock Cleanup", self.fix_stale_out_lock),
         ]
 
         for diagnosis_name, handler in handlers:
@@ -480,6 +505,14 @@ class OpencodeAgent:
 
         for attempt in range(1, max_retries + 1):
             self.log(f"--- Compilation Attempt {attempt} of {max_retries} ---", level="INFO")
+
+            # Clear any stale soong lock file from previous attempts or background workers
+            lock_path = self.work_dir / "out" / ".lock"
+            if lock_path.exists():
+                try:
+                    lock_path.unlink()
+                except Exception:
+                    pass
 
             # Apply any environment overrides accumulated from prior healings
             for k, v in self.env_overrides.items():
