@@ -1,0 +1,332 @@
+name: AERA Recovery Build (m20lte)
+
+on:
+  workflow_dispatch:
+    inputs:
+      makefile:
+        description: 'Lunch target'
+        required: false
+        default: 'twrp_m20lte-bp2a-eng'
+      build_target:
+        description: 'Make target'
+        required: false
+        default: 'recoveryimage'
+      aera_branch:
+        description: 'AERA manifest branch'
+        required: false
+        default: 'aera-16.0'
+      jobs:
+        description: 'Parallel make jobs'
+        required: false
+        default: '4'
+      publish_release:
+        description: 'Create a GitHub release with the image'
+        type: boolean
+        required: false
+        default: false
+  push:
+    branches:
+      - aera-16.0
+      - aera
+    tags:
+      - 'aera-v*'
+
+permissions:
+  contents: write
+
+env:
+  AERA_MANIFEST_URL: 'https://github.com/AERA-Recovery/android_manifest.git'
+  AERA_BRANCH: ${{ github.event.inputs.aera_branch || 'aera-16.0' }}
+  WORK: '/home/runner/aera'
+  DEVICE: 'm20lte'
+
+jobs:
+  build:
+    name: Build AERA Recovery for Samsung Galaxy M20 (m20lte)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout device repository
+        uses: actions/checkout@v4
+        with:
+          path: device_repo
+          fetch-depth: 1
+
+      - name: Free runner disk space & configure ZRAM / BTRFS workspace
+        run: |
+          echo "Cleaning runner disk space..."
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost \
+            /usr/share/swift /opt/microsoft /usr/local/.ghcup /usr/lib/jvm /usr/local/lib/node_modules /usr/local/julia* \
+            /usr/share/miniconda /opt/az /opt/google /opt/pipx /usr/local/share/chromium /usr/local/share/powershell /usr/share/kotlin /usr/lib/mono /usr/lib/llvm-* /var/lib/apt/lists/* /usr/lib/google-cloud-sdk /usr/lib/firefox /usr/local/n || true
+          sudo docker system prune -af --volumes >/dev/null 2>&1 || true
+          sudo apt-get clean
+          sudo swapoff -a || true
+          sudo fallocate -l 4G /mnt/swapfile && sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile && sudo swapon -p 10 /mnt/swapfile
+          sudo apt-get update -qq && sudo apt-get install -y -qq btrfs-progs linux-modules-extra-$(uname -r) || true
+
+          # Configure 16G compressed zram swap for heavy soong analysis
+          sudo modprobe zram || true
+          if [ -e /sys/block/zram0 ]; then
+            echo zstd | sudo tee /sys/block/zram0/comp_algorithm >/dev/null || true
+            echo 16G | sudo tee /sys/block/zram0/disksize >/dev/null
+            sudo mkswap /dev/zram0 >/dev/null && sudo swapon -p 100 /dev/zram0
+          fi
+          sudo sysctl -w vm.swappiness=180 vm.page-cluster=0 >/dev/null || true
+
+          # Create 160G transparent compressed btrfs loop workspace
+          sudo modprobe btrfs || true
+          sudo truncate -s 160G /work.img
+          LOOP=$(sudo losetup -f --show /work.img)
+          sudo mkfs.btrfs -q -f $LOOP
+          sudo mkdir -p $WORK
+          sudo mount -o compress-force=zstd:3,noatime,ssd,discard=async $LOOP $WORK
+          sudo chown $USER:$USER $WORK
+          df -h / $WORK; free -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl python3 python-is-python3 \
+            build-essential bc bison flex gperf libxml2-utils lz4 zip unzip rsync \
+            libssl-dev libncurses-dev libelf-dev zlib1g-dev xsltproc fontconfig ccache openjdk-17-jdk-headless jq liblzma-dev
+          mkdir -p ~/bin && curl -sL https://storage.googleapis.com/git-repo-downloads/repo -o ~/bin/repo && chmod +x ~/bin/repo
+          git config --global user.name "ci" && git config --global user.email "ci@example.com"
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git config --global color.ui false
+          java -version 2>&1
+
+      - name: Sync AERA sources
+        working-directory: ${{ env.WORK }}
+        run: |
+          set -o pipefail
+          mkdir -p $WORK/.tmp; export TMPDIR=$WORK/.tmp
+          ~/bin/repo init -u "$AERA_MANIFEST_URL" -b "$AERA_BRANCH" --depth=1 --no-clone-bundle
+          mkdir -p .repo/local_manifests
+          cp "$GITHUB_WORKSPACE/device_repo/slim.xml" .repo/local_manifests/slim.xml
+          {
+            ok=0
+            for i in 1 2 3 4 5; do
+              echo "Repo sync attempt $i..."
+              ~/bin/repo sync -c -j$([ $i -le 1 ] && echo 4 || echo 2) --no-tags --no-clone-bundle --force-sync --optimized-fetch --retry-fetches=3 && { ok=1; break; }
+              echo "Sync attempt $i failed, retrying in $((i*30))s..."; sleep $((i*30))
+            done
+            [ $ok = 1 ]
+          } 2>&1 | tee "$GITHUB_WORKSPACE/sync.log"
+          df -h / $WORK; sudo btrfs filesystem df $WORK || true
+
+      - name: Install device tree
+        run: |
+          set -e
+          mkdir -p "$WORK/device/samsung/m20lte"
+          rsync -av --exclude=".git" --exclude=".github" device_repo/ "$WORK/device/samsung/m20lte/"
+          ls -la "$WORK/device/samsung/m20lte"
+
+      - name: Install LineageOS mkbootimg (Samsung Exynos --dt support)
+        run: |
+          set -e
+          rm -rf "$WORK/system/tools/mkbootimg"
+          git clone --depth=1 -b lineage-21.0 https://github.com/LineageOS/android_system_tools_mkbootimg "$WORK/system/tools/mkbootimg" || \
+          git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_system_tools_mkbootimg "$WORK/system/tools/mkbootimg"
+          echo "LineageOS mkbootimg installed successfully."
+
+      - name: Clean incompatible test tasks
+        working-directory: ${{ env.WORK }}
+        run: |
+          grep -rl --include='*.mk' 'tools/compatibility.mk' build/make/core/tasks test tools 2>/dev/null | tee /tmp/compat_users.txt | xargs -r rm -f || true
+          ( cd build/make/core/tasks && rm -fv catbox.mk csuite.mk cts*.mk mcts.mk mts.mk sts.mk wvts.mk dts.mk vts-core-tests.mk \
+              prebuilt_tradefed.mk tradefed-tests-list.mk general-tests.mk host-unit-tests.mk device-tests.mk art-host-tests.mk \
+              automotive-*.mk performance-tests.mk device-platinum-tests.mk berberis_test.mk ) || true
+
+      - name: Compile AERA Recovery
+        working-directory: ${{ env.WORK }}
+        env:
+          ALLOW_MISSING_DEPENDENCIES: 'true'
+          BUILD_JOBS: ${{ inputs.jobs || '4' }}
+          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-bp2a-eng' }}
+          BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
+          TARGET_RELEASE: 'bp2a'
+          LC_ALL: 'C'
+          TW_DEVICE_VERSION: 'aera'
+        run: |
+          set -o pipefail
+          source build/envsetup.sh
+          
+          # Lunch with fallback handling
+          set +e
+          lunch "$MAKEFILE_NAME" > "$GITHUB_WORKSPACE/lunch.log" 2>&1
+          LUNCH_RC=$?
+          if [ "$LUNCH_RC" -ne 0 ]; then
+            echo "Trying alternate lunch twrp_m20lte bp2a eng..."
+            lunch twrp_m20lte bp2a eng >> "$GITHUB_WORKSPACE/lunch.log" 2>&1
+            LUNCH_RC=$?
+          fi
+          if [ "$LUNCH_RC" -ne 0 ]; then
+            echo "Trying alternate lunch twrp_m20lte-eng..."
+            lunch twrp_m20lte-eng >> "$GITHUB_WORKSPACE/lunch.log" 2>&1
+            LUNCH_RC=$?
+          fi
+          set -e
+          cat "$GITHUB_WORKSPACE/lunch.log"
+          
+          mka -j"$BUILD_JOBS" adbd $BUILD_TARGET 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
+
+      - name: Package Samsung Odin Tar & Checksums
+        if: success()
+        run: |
+          OUT_DIR="$WORK/out/target/product/m20lte"
+          if [ -f "$OUT_DIR/recovery.img" ]; then
+            echo "Packaging Samsung Odin tar archives with SEANDROIDENFORCE..."
+            cd "$OUT_DIR"
+            # 1. Append SEANDROIDENFORCE magic trailer required by Samsung Exynos sboot
+            if ! tail -c 16 recovery.img | grep -q "SEANDROIDENFORCE"; then
+              echo -n "SEANDROIDENFORCE" >> recovery.img
+            fi
+
+            # 2. Package Odin tar archive
+            tar -H ustar -c recovery.img > recovery.tar
+            cp -f recovery.tar recovery.tar.md5
+            md5sum -t recovery.tar.md5 >> recovery.tar.md5
+
+            # 3. Checksums
+            md5sum recovery.img > recovery.img.md5
+            sha256sum recovery.img > recovery.img.sha256
+            cd "$GITHUB_WORKSPACE"
+          fi
+          ls -lh "$OUT_DIR"
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aera-m20lte-build-logs
+          path: |
+            build.log
+            lunch.log
+            sync.log
+          if-no-files-found: ignore
+
+      - name: Upload recovery artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aera-m20lte-recovery
+          path: |
+            ${{ env.WORK }}/out/target/product/m20lte/*.zip
+            ${{ env.WORK }}/out/target/product/m20lte/*.md5
+            ${{ env.WORK }}/out/target/product/m20lte/*.sha256
+            ${{ env.WORK }}/out/target/product/m20lte/*.tar
+            ${{ env.WORK }}/out/target/product/m20lte/recovery.img
+          if-no-files-found: warn
+
+      - name: Create GitHub Release
+        if: github.event.inputs.publish_release == 'true' || startsWith(github.ref, 'refs/tags/aera-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.WORK }}/out/target/product/m20lte/*.zip
+            ${{ env.WORK }}/out/target/product/m20lte/*.md5
+            ${{ env.WORK }}/out/target/product/m20lte/*.sha256
+            ${{ env.WORK }}/out/target/product/m20lte/*.tar
+            ${{ env.WORK }}/out/target/product/m20lte/recovery.img
+          generate_release_notes: true
+
+      - name: Upload Artifacts to Gofile & Notify Telegram
+        if: always()
+        continue-on-error: true
+        env:
+          GOFILE_TOKEN: 'IoC222lPjhLcrkCYcgVLdo7OkQRDW201'
+          TELEGRAM_BOT_TOKEN: '8477945979:AAGTYiUAfnPjQFpkh576D7Xsqm0RDQJr_As'
+          TELEGRAM_CHAT_ID: '8198896729'
+          JOB_STATUS: ${{ job.status }}
+          RECOVERY_FLAVOR: 'AERA'
+        run: |
+          python3 - << 'EOF'
+          import os, glob, hashlib, json, subprocess, urllib.request
+
+          flavor = os.environ.get("RECOVERY_FLAVOR", "AERA")
+          status = os.environ.get("JOB_STATUS", "failure")
+          gofile_token = os.environ.get("GOFILE_TOKEN", "")
+          tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "")
+          work_dir = os.environ.get("WORK", "/home/runner/aera")
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          run_id = os.environ.get("GITHUB_RUN_ID", "")
+          sha = os.environ.get("GITHUB_SHA", "")[:7]
+          branch = os.environ.get("GITHUB_REF_NAME", "aera-16.0")
+
+          def send_tg(text):
+              if not tg_token or not tg_chat: return
+              data = json.dumps({
+                  "chat_id": tg_chat,
+                  "text": text,
+                  "parse_mode": "HTML",
+                  "disable_web_page_preview": True
+              }).encode("utf-8")
+              req = urllib.request.Request(f"https://api.telegram.org/bot{tg_token}/sendMessage", data=data, headers={"Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r: pass
+              except Exception as e: print("Telegram send error:", e)
+
+          if status != "success":
+              fail_msg = f"❌ <b>{flavor} Build Failed!</b>\n\n📱 <b>Device:</b> Samsung Galaxy M20 (<code>m20lte</code>)\n🌿 <b>Branch:</b> {branch}\n🔖 <b>Commit:</b> <a href=\"https://github.com/{repo}/commit/{sha}\">{sha}</a>\n⏱ <b>Logs:</b> <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">View Failed Run</a>"
+              send_tg(fail_msg)
+              exit(0)
+
+          target_dir = f"{work_dir}/out/target/product/m20lte"
+          files = sorted(glob.glob(f"{target_dir}/*.zip") + glob.glob(f"{target_dir}/*.tar") + glob.glob(f"{target_dir}/recovery.img"))
+          if not files:
+              send_tg(f"⚠️ <b>{flavor} Build Succeeded</b> but no recovery artifacts were found in {target_dir}.\n⏱ Run: <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">#{run_id}</a>")
+              exit(0)
+
+          try:
+              req = urllib.request.Request("https://api.gofile.io/servers", headers={"Authorization": f"Bearer {gofile_token}"})
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  sdata = json.loads(r.read().decode("utf-8"))
+                  servers = [s.get("name") for s in sdata.get("data", {}).get("servers", []) if s.get("name")]
+          except Exception:
+              servers = ["store-na-phx-1", "store6", "store3", "store1"]
+          if not servers:
+              servers = ["store-na-phx-1", "store6", "store3"]
+
+          links = []
+          for f in files:
+              fname = os.path.basename(f)
+              fsize = f"{os.path.getsize(f) / (1024*1024):.1f}MB"
+              h = hashlib.sha256(open(f, "rb").read()).hexdigest()[:16]
+              
+              dl = None
+              for srv in servers:
+                  cmd = f'curl -sSL --http1.1 --connect-timeout 30 --max-time 600 -X POST "https://{srv}.gofile.io/contents/uploadfile" -H "Authorization: Bearer {gofile_token}" -F "file=@{f}"'
+                  try:
+                      res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, text=True, timeout=660)
+                      if res.stdout:
+                          j = json.loads(res.stdout)
+                          dl = j.get("data", {}).get("downloadPage")
+                          if dl: break
+                  except Exception as e: pass
+
+              lb_dl = None
+              try:
+                  lb_cmd = f'curl -sSL --http1.1 --connect-timeout 30 --max-time 600 -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@{f}" https://litterbox.catbox.moe/resources/internals/api.php'
+                  lb_res = subprocess.run(lb_cmd, shell=True, stdout=subprocess.PIPE, text=True, timeout=660).stdout.strip()
+                  if lb_res.startswith("http"):
+                      lb_dl = lb_res
+              except Exception as e: pass
+
+              mirror_links = []
+              if dl:
+                  mirror_links.append(f'📂 <a href="{dl}">Gofile</a>')
+              if lb_dl:
+                  mirror_links.append(f'⚡ <a href="{lb_dl}">Litterbox (Direct)</a>')
+              
+              if mirror_links:
+                  links.append(f"📦 <b>{fname}</b> ({fsize})\n" + " | ".join(mirror_links) + f"\n🔑 <code>{h}...</code>")
+              else:
+                  links.append(f"⚠️ <b>{fname}</b> ({fsize}) - Upload error")
+
+          msg = f"🎉 <b>{flavor} Build Completed!</b>\n\n📱 <b>Device:</b> Samsung Galaxy M20 (<code>m20lte</code>)\n🌿 <b>Branch:</b> {branch}\n🔖 <b>Commit:</b> <a href=\"https://github.com/{repo}/commit/{sha}\">{sha}</a>\n⏱ <b>Run:</b> <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">View on GitHub Actions</a>\n\n" + "\n\n".join(links) + "\n\n🚀 <i>Ready to flash via Odin, Heimdall, fastboot, or recovery!</i>"
+          send_tg(msg)
+          print("Notification sent successfully!")
+          EOF

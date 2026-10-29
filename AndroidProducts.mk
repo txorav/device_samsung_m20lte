@@ -21,4 +21,5 @@ PRODUCT_MAKEFILES := \
 
 COMMON_LUNCH_CHOICES := \
     twrp_m20lte-eng \
-    twrp_m20lte-userdebug
+    twrp_m20lte-userdebug \
+    twrp_m20lte-bp2a-eng
