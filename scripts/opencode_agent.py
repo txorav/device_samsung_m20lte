@@ -342,6 +342,37 @@ class OpencodeAgent:
         return desc
 
 
+    def fix_soong_extra_variables_json(self, log_content):
+        """Fixes malformed JSON in soong.*.extra.variables caused by quotes in make variables."""
+        if "Error parsing JSON in file:" not in log_content and "extra.variables" not in log_content:
+            return False
+
+        self.log("Detected malformed JSON in soong.extra.variables", level="ACTION")
+        fixed = []
+        # Strip literal quotes around make variables across device makefiles
+        for mk in self.device_dir.glob("*.mk"):
+            try:
+                content = mk.read_text(encoding="utf-8")
+                new_content = re.sub(r'(:=\s*)["\']([^"\'\n]+)["\']', r'\1\2', content)
+                if new_content != content:
+                    mk.write_text(new_content, encoding="utf-8")
+                    fixed.append(mk.name)
+            except Exception as e:
+                self.log(f"Error updating {mk}: {e}", level="WARN")
+
+        # Purge corrupted extra.variables files from out/soong
+        soong_dir = self.work_dir / "out" / "soong"
+        if soong_dir.exists():
+            for f in soong_dir.glob("*.variables"):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+
+        desc = f"Stripped literal quotes from {', '.join(fixed) if fixed else 'makefiles'} and purged corrupted soong.variables"
+        self.log(f"Remediation: {desc}", level="SUCCESS")
+        return desc
+
     def fix_mkbootimg_dt_argument(self, log_content):
         """Patches mkbootimg.py to support --dt for Samsung Exynos."""
         if "mkbootimg: error: unrecognized arguments: --dt" not in log_content:
@@ -481,6 +512,7 @@ class OpencodeAgent:
             ("Sandboxing NSJAIL Environment Config", self.fix_sandbox_nsjail),
             ("Mkbootimg Samsung Exynos --dt Patch", self.fix_mkbootimg_dt_argument),
             ("Missing Host Tools Resolution", self.fix_missing_host_command),
+            ("Soong Extra Variables JSON Fix", self.fix_soong_extra_variables_json),
             ("Stale Output Lock Cleanup", self.fix_stale_out_lock),
         ]
 
