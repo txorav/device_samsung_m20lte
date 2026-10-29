@@ -443,6 +443,42 @@ class OpencodeAgent:
         self.log(f"Remediation: {desc}", level="SUCCESS")
         return desc
 
+    def fix_invalid_lunch_choices(self, log_content=""):
+        """Ensures COMMON_LUNCH_CHOICES only contains valid <product>-<variant> combos without bp2a release tags."""
+        prod_mk = self.device_dir / "AndroidProducts.mk"
+        if not prod_mk.exists():
+            return False
+        try:
+            content = prod_mk.read_text(encoding="utf-8")
+            if "bp2a" in content:
+                new_content = re.sub(r"[ \t]*[a-zA-Z0-9_]+-bp2a-[a-zA-Z0-9_]+[ \t]*\\?", "", content)
+                new_content = re.sub(r"\n\s*\n+", "\n\n", new_content)
+                if new_content != content:
+                    prod_mk.write_text(new_content, encoding="utf-8")
+                    desc = f"Sanitized COMMON_LUNCH_CHOICES in {prod_mk.name} (removed invalid bp2a combo)"
+                    self.log(f"Remediation: {desc}", level="SUCCESS")
+                    return desc
+        except Exception as e:
+            self.log(f"Could not sanitize {prod_mk}: {e}", level="WARNING")
+        return False
+
+    def fix_rust_archive_failure(self, log_content=""):
+        """Fixes rustc failed to build archive by clearing corrupted rust intermediate files."""
+        if "error: failed to build archive" not in log_content:
+            return False
+        self.log("Detected corrupted Rust sysroot/archive intermediate files", level="ACTION")
+        rust_intermediates = self.work_dir / "out" / "soong" / ".intermediates" / "prebuilts" / "rust"
+        if rust_intermediates.exists():
+            try:
+                import shutil
+                shutil.rmtree(rust_intermediates)
+                desc = f"Removed corrupted {rust_intermediates}"
+                self.log(f"Remediation: {desc}", level="SUCCESS")
+                return desc
+            except Exception as e:
+                self.log(f"Failed to remove {rust_intermediates}: {e}", level="WARNING")
+        return False
+
 
     def run_opencode_cli_fallback(self, log_content):
         """Invokes opencode CLI with failure context if installed."""
@@ -514,6 +550,8 @@ class OpencodeAgent:
             ("Missing Host Tools Resolution", self.fix_missing_host_command),
             ("Soong Extra Variables JSON Fix", self.fix_soong_extra_variables_json),
             ("Stale Output Lock Cleanup", self.fix_stale_out_lock),
+            ("Invalid Lunch Choices Sanitizer", self.fix_invalid_lunch_choices),
+            ("Corrupted Rust Intermediate Archive Recovery", self.fix_rust_archive_failure),
         ]
 
         for diagnosis_name, handler in handlers:
@@ -546,11 +584,18 @@ class OpencodeAgent:
         self.log(f"Command: {command}", level="INFO")
 
         current_env = os.environ.copy()
-        # Proactively neutralize fatal DEXPREOPT enforcement in core makefiles if present
+        # Proactively sanitize makefiles and neutralize fatal checks before attempt 1
+        self.fix_invalid_lunch_choices()
         self.fix_dexpreopt_user_userdebug(force=True)
 
         for attempt in range(1, max_retries + 1):
             self.log(f"--- Compilation Attempt {attempt} of {max_retries} ---", level="INFO")
+
+            # Kill any lingering background compilers or ninja processes
+            try:
+                subprocess.run(["pkill", "-9", "-f", "ninja|soong_ui|mka"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
 
             # Clear any stale soong lock file from previous attempts or background workers
             lock_path = self.work_dir / "out" / ".lock"
