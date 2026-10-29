@@ -29,8 +29,7 @@ AERA_OPTIONS_LIST_NUM := 6
 AERA_USE_GREEN_LED := 0
 AERA_USE_LOCKSCREEN_BUTTON := 1
 
-# Partition, Storage & Tooling
-AERA_ENABLE_ALL_PARTITION_TOOLS := 1
+# Partition, Storage & Tooling (Galaxy M20 has physical non-dynamic partitions)
 AERA_FORCE_DATA_FORMAT_F2FS := 1
 AERA_UNBIND_SDCARD_F2FS := 1
 AERA_WIPE_METADATA_AFTER_DATAFORMAT := 1
