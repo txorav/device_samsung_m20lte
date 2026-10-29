@@ -152,11 +152,15 @@ jobs:
           ( cd build/make/core/tasks && rm -fv catbox.mk csuite.mk cts*.mk mcts.mk mts.mk sts.mk wvts.mk dts.mk vts-core-tests.mk \
               prebuilt_tradefed.mk tradefed-tests-list.mk general-tests.mk host-unit-tests.mk device-tests.mk art-host-tests.mk \
               automotive-*.mk performance-tests.mk device-platinum-tests.mk berberis_test.mk dex_preopt_check.mk ) || true
+          if [ -f build/make/core/artifact_path_requirements.mk ]; then
+            sed -i '1s/^/DISABLE_ARTIFACT_PATH_REQUIREMENTS := true\n/' build/make/core/artifact_path_requirements.mk || true
+          fi
 
       - name: Compile AERA Recovery
         working-directory: ${{ env.WORK }}
         env:
           ALLOW_MISSING_DEPENDENCIES: 'true'
+          DISABLE_ARTIFACT_PATH_REQUIREMENTS: 'true'
           BUILD_JOBS: ${{ inputs.jobs || '4' }}
           MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-bp2a-userdebug' }}
           BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}

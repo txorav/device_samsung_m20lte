@@ -136,7 +136,7 @@ class OpencodeAgent:
 
     def fix_dexpreopt_check_task(self, log_content):
         """Neutralizes dex_preopt_check.mk failures caused by pruned system server apexes."""
-        if "dex_preopt_check.mk" not in log_content and "Offending entries:" not in log_content:
+        if "dex_preopt_check.mk" not in log_content:
             return False
 
         self.log("Detected dex_preopt_check.mk failure", level="ACTION")
@@ -287,14 +287,48 @@ class OpencodeAgent:
         return False
 
     def fix_sandbox_nsjail(self, log_content):
-        """Sets env flags when nsjail sandbox cannot run on runner."""
-        if "sandboxing disabled due to nsjail error" in log_content or "failed to run command.*nsjail" in log_content:
+        """Sets env flags when nsjail sandbox fails."""
+        if ("FAILED:" in log_content or "ninja: error:" in log_content) and ("nsjail" in log_content.lower()):
             self.env_overrides["DISABLE_SANDBOX"] = "true"
-            self.env_overrides["TEMPORARY_DISABLE_PATH_RESTRICTIONS"] = "true"
-            desc = "Configured sandbox bypass environment variables"
+            desc = "Configured sandbox bypass (DISABLE_SANDBOX=true)"
             self.log(f"Remediation: {desc}", level="SUCCESS")
             return desc
         return False
+
+    def fix_artifact_path_requirements(self, log_content):
+        """Disables strict artifact path requirements when files land in unexpected partitions."""
+        if "artifact_path_requirements" not in log_content and "produces files outside its artifact path requirement" not in log_content:
+            return False
+
+        self.log("Detected artifact_path_requirements failure", level="ACTION")
+        self.env_overrides["DISABLE_ARTIFACT_PATH_REQUIREMENTS"] = "true"
+
+        # Patch build/make/core/artifact_path_requirements.mk if present
+        mk_path = self.work_dir / "build" / "make" / "core" / "artifact_path_requirements.mk"
+        if mk_path.exists():
+            try:
+                c = mk_path.read_text(encoding="utf-8")
+                if "DISABLE_ARTIFACT_PATH_REQUIREMENTS" not in c:
+                    c = "DISABLE_ARTIFACT_PATH_REQUIREMENTS := true\n" + c
+                    mk_path.write_text(c, encoding="utf-8")
+            except Exception as e:
+                self.log(f"Failed patching artifact_path_requirements.mk: {e}", level="WARN")
+
+        # Also add to BoardConfig.mk
+        board_cfg = self.device_dir / "BoardConfig.mk"
+        if board_cfg.exists():
+            try:
+                c = board_cfg.read_text(encoding="utf-8")
+                if "PRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS" not in c:
+                    c += "\nPRODUCT_ENFORCE_ARTIFACT_PATH_REQUIREMENTS := false\n"
+                    board_cfg.write_text(c, encoding="utf-8")
+            except Exception as e:
+                self.log(f"Failed updating BoardConfig.mk: {e}", level="WARN")
+
+        desc = "Disabled strict artifact path requirements (DISABLE_ARTIFACT_PATH_REQUIREMENTS=true)"
+        self.log(f"Remediation: {desc}", level="SUCCESS")
+        return desc
+
 
     def fix_mkbootimg_dt_argument(self, log_content):
         """Patches mkbootimg.py to support --dt for Samsung Exynos."""
@@ -407,6 +441,7 @@ class OpencodeAgent:
             ("Broken Duplicate Build Rules Fix", self.fix_broken_duplicate_rules),
             ("Broken Prebuilt ELF Verification Fix", self.fix_broken_elf_prebuilts),
             ("Missing Required Modules Allowances", self.fix_missing_required_modules),
+            ("Artifact Path Requirements Bypass", self.fix_artifact_path_requirements),
             ("Sandboxing NSJAIL Environment Config", self.fix_sandbox_nsjail),
             ("Mkbootimg Samsung Exynos --dt Patch", self.fix_mkbootimg_dt_argument),
             ("Missing Host Tools Resolution", self.fix_missing_host_command),

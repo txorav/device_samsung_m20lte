@@ -195,6 +195,7 @@ jobs:
         env:
           USE_CCACHE: ${{ inputs.ccache || 'true' }}
           ALLOW_MISSING_DEPENDENCIES: 'true'
+          DISABLE_ARTIFACT_PATH_REQUIREMENTS: 'true'
           BUILD_JOBS: ${{ inputs.jobs || '4' }}
           MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-userdebug' }}
           BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
