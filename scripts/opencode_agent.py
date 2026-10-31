@@ -187,17 +187,38 @@ class OpencodeAgent:
 
         board_cfg = self.device_dir / "BoardConfig.mk"
         vendorsetup = self.device_dir / "vendorsetup.sh"
+        aera_mk = self.device_dir / "aera_m20lte.mk"
         actions = []
 
         if board_cfg.exists():
             content = board_cfg.read_text(encoding="utf-8")
             if "LZMA_RAMDISK_TARGETS" not in content:
                 content += "\nLZMA_RAMDISK_TARGETS := recovery\n"
-                actions.append("Enabled LZMA_RAMDISK_TARGETS in BoardConfig.mk")
+                actions.append("Enabled LZMA_RAMDISK_TARGETS")
             if "OF_USE_LZMA_COMPRESSION" not in content:
                 content += "\nOF_USE_LZMA_COMPRESSION := 1\n"
-                actions.append("Set OF_USE_LZMA_COMPRESSION in BoardConfig.mk")
+                actions.append("Set OF_USE_LZMA_COMPRESSION")
+            if "BOARD_RAMDISK_USE_XZ" not in content:
+                content += "\nBOARD_RAMDISK_USE_XZ := true\n"
+                actions.append("Set BOARD_RAMDISK_USE_XZ := true")
+
+            # Disable high-footprint modules
+            for var in ["TW_INCLUDE_CRYPTO", "TW_INCLUDE_CRYPTO_FBE", "AERA_INCLUDE_CRYPTO", "AERA_INCLUDE_CRYPTO_FBE",
+                        "TW_INCLUDE_NTFS_3G", "AERA_INCLUDE_NTFS_3G", "TW_INCLUDE_FUSE_NTFS", "AERA_INCLUDE_FUSE_NTFS",
+                        "TWRP_INCLUDE_LOGCAT", "AERA_INCLUDE_LOGCAT", "TARGET_USES_LOGD"]:
+                pattern = rf"^[ \t]*{var}[ \t]*:=.*$"
+                if re.search(pattern, content, flags=re.MULTILINE):
+                    content = re.sub(pattern, f"{var} := false", content, flags=re.MULTILINE)
+                    actions.append(f"Disabled {var}")
+
             board_cfg.write_text(content, encoding="utf-8")
+
+        if aera_mk.exists():
+            acontent = aera_mk.read_text(encoding="utf-8")
+            if "AERA_ENABLE_WLAN := 1" in acontent:
+                acontent = acontent.replace("AERA_ENABLE_WLAN := 1", "AERA_ENABLE_WLAN := 0")
+                aera_mk.write_text(acontent, encoding="utf-8")
+                actions.append("Disabled AERA_ENABLE_WLAN")
 
         if vendorsetup.exists():
             vcontent = vendorsetup.read_text(encoding="utf-8")
@@ -206,7 +227,7 @@ class OpencodeAgent:
                 vendorsetup.write_text(vcontent, encoding="utf-8")
                 actions.append("Exported OF_USE_LZMA_COMPRESSION in vendorsetup.sh")
 
-        desc = f"Enforced LZMA compression ({', '.join(actions)})"
+        desc = f"Trimming recovery ramdisk to fit partition limit: {', '.join(actions)}"
         self.log(f"Remediation: {desc}", level="SUCCESS")
         return desc
 

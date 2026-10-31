@@ -43,5 +43,5 @@ AERA_NO_TREBLE_COMPATIBILITY_CHECK := 1
 AERA_ENABLE_FRP_WIPE := 1
 AERA_ENABLE_ROOT_MANAGER := 1
 
-# Network & PC Connection over WLAN
-AERA_ENABLE_WLAN := 1
+# Network & PC Connection over WLAN (disabled to prevent partition overflow on 38MB recovery partition)
+AERA_ENABLE_WLAN := 0

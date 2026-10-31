@@ -220,6 +220,7 @@ jobs:
           USE_CCACHE: ${{ inputs.ccache || 'true' }}
           ALLOW_MISSING_DEPENDENCIES: 'true'
           DISABLE_ARTIFACT_PATH_REQUIREMENTS: 'true'
+          DISABLE_SANDBOX: 'true'
           BUILD_JOBS: ${{ inputs.jobs || '4' }}
           MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-userdebug' }}
           BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
@@ -232,14 +233,14 @@ jobs:
           cd "$SRC_DIR"
           unset FOX_VERSION
           export FOX_MAINTAINER_PATCH_VERSION="1"
+          export OF_DISABLE_MIUI_SPECIFIC_FEATURES=1
+          export OF_DISABLE_MIUI_OTA_BY_DEFAULT=1
 
           if [ "${{ steps.flavor.outputs.is_vanilla }}" = "1" ]; then
             export FOX_VANILLA_BUILD=1
-            export OF_VANILLA_BUILD=1
             echo "=== Compiling OrangeFox Recovery (Vanilla Edition) ==="
           else
             unset FOX_VANILLA_BUILD
-            unset OF_VANILLA_BUILD
             echo "=== Compiling OrangeFox Recovery (Standard Edition) ==="
           fi
 
@@ -249,7 +250,7 @@ jobs:
             --log "$GITHUB_WORKSPACE/$SRC_DIR/build.log" \
             --actions-log "$GITHUB_WORKSPACE/$SRC_DIR/opencode_agent_actions.log" \
             --max-retries 4 \
-            --command "set +e; source build/envsetup.sh && lunch \$MAKEFILE_NAME && export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE && mka -j\$BUILD_JOBS \$BUILD_TARGET"
+            --command "set +e; source build/envsetup.sh && { lunch \$MAKEFILE_NAME || lunch twrp_m20lte-userdebug; } && export TARGET_PRODUCT=twrp_m20lte TARGET_BUILD_VARIANT=userdebug TARGET_BUILD_TYPE=release && mka -j\$BUILD_JOBS \$BUILD_TARGET"
 
       - name: Package Odin Tar & Checksums
         if: success()
