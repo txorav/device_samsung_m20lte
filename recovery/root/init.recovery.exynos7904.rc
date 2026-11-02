@@ -11,10 +11,10 @@ on early-init
 
 on init
     setprop sys.usb.configfs 1
-
-on fs
-    wait /dev/block/platform/13500000.dwmmc0
+    # Create bootdevice symlinks immediately during early init
+    wait /dev/block/platform/13500000.dwmmc0 5
     symlink /dev/block/platform/13500000.dwmmc0 /dev/block/bootdevice
+    symlink /dev/block/platform/13500000.dwmmc0/by-name /dev/block/bootdevice/by-name
 
     symlink /dev/block/bootdevice/by-name/BOOT /dev/block/bootdevice/by-name/boot
     symlink /dev/block/bootdevice/by-name/RECOVERY /dev/block/bootdevice/by-name/recovery
@@ -27,6 +27,13 @@ on fs
     symlink /dev/block/bootdevice/by-name/UP_PARAM /dev/block/bootdevice/by-name/up_param
     symlink /dev/block/bootdevice/by-name/DTBO /dev/block/bootdevice/by-name/dtbo
     symlink /dev/block/bootdevice/by-name/PRODUCT /dev/block/bootdevice/by-name/product
+    symlink /dev/block/bootdevice/by-name/USERDATA /dev/block/bootdevice/by-name/userdata
+    symlink /dev/block/bootdevice/by-name/USERDATA /dev/block/bootdevice/by-name/data
+
+on fs
+    wait /dev/block/platform/13500000.dwmmc0 5
+    symlink /dev/block/platform/13500000.dwmmc0 /dev/block/bootdevice
+    symlink /dev/block/platform/13500000.dwmmc0/by-name /dev/block/bootdevice/by-name
 
     # Pre-create /sdcard/Fox/FoxFiles to eliminate "OrangeFox can't access its files" hint
     mkdir /data/media 0775 media_rw media_rw

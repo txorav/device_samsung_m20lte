@@ -59,6 +59,7 @@ BOARD_MKBOOTIMG_ARGS += --ramdisk_offset $(BOARD_RAMDISK_OFFSET)
 BOARD_MKBOOTIMG_ARGS += --tags_offset $(BOARD_KERNEL_TAGS_OFFSET)
 BOARD_MKBOOTIMG_ARGS += --dt $(TARGET_PREBUILT_DT)
 BOARD_KERNEL_IMAGE_NAME := Image.gz
+BOARD_KERNEL_CMDLINE := androidboot.hardware=universal7904 androidboot.bootdevice=13500000.dwmmc0 androidboot.selinux=permissive
 
 # File systems
 BOARD_HAS_LARGE_FILESYSTEM := true
@@ -87,6 +88,13 @@ TARGET_COPY_OUT_VENDOR := vendor
 BOARD_BUILD_SYSTEM_ROOT_IMAGE := true
 BOARD_SUPPRESS_SECURE_ERASE := true
 TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery/root/system/etc/recovery.fstab
+
+# Bootdevice and hardware properties
+PRODUCT_PROPERTY_OVERRIDES += \
+    ro.hardware=universal7904 \
+    ro.boot.hardware=universal7904 \
+    ro.boot.bootdevice=13500000.dwmmc0 \
+    ro.bootdevice=13500000.dwmmc0
 
 # Recovery
 BOARD_HAS_DOWNLOAD_MODE := true
