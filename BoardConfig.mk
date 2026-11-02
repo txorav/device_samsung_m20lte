@@ -59,7 +59,7 @@ BOARD_MKBOOTIMG_ARGS += --ramdisk_offset $(BOARD_RAMDISK_OFFSET)
 BOARD_MKBOOTIMG_ARGS += --tags_offset $(BOARD_KERNEL_TAGS_OFFSET)
 BOARD_MKBOOTIMG_ARGS += --dt $(TARGET_PREBUILT_DT)
 BOARD_KERNEL_IMAGE_NAME := Image.gz
-BOARD_KERNEL_CMDLINE := androidboot.hardware=universal7904 androidboot.bootdevice=13500000.dwmmc0 androidboot.selinux=permissive
+BOARD_KERNEL_CMDLINE := androidboot.hardware=exynos7904 androidboot.bootdevice=13500000.dwmmc0
 
 # File systems
 BOARD_HAS_LARGE_FILESYSTEM := true
@@ -91,8 +91,8 @@ TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery/root/system/etc/recovery.fstab
 
 # Bootdevice and hardware properties
 PRODUCT_PROPERTY_OVERRIDES += \
-    ro.hardware=universal7904 \
-    ro.boot.hardware=universal7904 \
+    ro.hardware=exynos7904 \
+    ro.boot.hardware=exynos7904 \
     ro.boot.bootdevice=13500000.dwmmc0 \
     ro.bootdevice=13500000.dwmmc0
 
@@ -113,10 +113,10 @@ PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
 LZMA_RAMDISK_TARGETS := recovery
 BOARD_RAMDISK_USE_XZ := true
 
-# Crypto (Galaxy M20 uses standard block storage without FBE in recovery)
-TW_INCLUDE_CRYPTO := false
+# Crypto (Galaxy M20 uses standard dm-crypt block encryption)
+TW_INCLUDE_CRYPTO := true
 TW_INCLUDE_CRYPTO_FBE := false
-AERA_INCLUDE_CRYPTO := false
+AERA_INCLUDE_CRYPTO := true
 AERA_INCLUDE_CRYPTO_FBE := false
 
 # TWRP & AERA build flags
