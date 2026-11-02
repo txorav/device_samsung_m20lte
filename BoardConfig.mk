@@ -106,10 +106,10 @@ PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
 LZMA_RAMDISK_TARGETS := recovery
 BOARD_RAMDISK_USE_XZ := true
 
-# Crypto (Galaxy M20 uses standard dm-crypt block encryption)
-TW_INCLUDE_CRYPTO := true
+# Crypto (Galaxy M20 uses legacy FDE which is not supported in Android 12; disable to prevent Keystore2 aborts)
+TW_INCLUDE_CRYPTO := false
 TW_INCLUDE_CRYPTO_FBE := false
-AERA_INCLUDE_CRYPTO := true
+AERA_INCLUDE_CRYPTO := false
 AERA_INCLUDE_CRYPTO_FBE := false
 
 # TWRP & AERA build flags
