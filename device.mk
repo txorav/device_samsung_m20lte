@@ -22,6 +22,10 @@ TW_INCLUDE_FASTBOOTD := false
 PRODUCT_PROPERTY_OVERRIDES += \
 	of_hide_data_hint=1 \
 	ro.orangefox.version=R12.1 \
-	ro.product.device=m20lte
+	ro.product.device=m20lte \
+	ro.hardware=exynos7904 \
+	ro.boot.hardware=exynos7904 \
+	ro.boot.bootdevice=13500000.dwmmc0 \
+	ro.bootdevice=13500000.dwmmc0
 
 

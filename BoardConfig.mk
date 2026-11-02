@@ -89,13 +89,6 @@ BOARD_BUILD_SYSTEM_ROOT_IMAGE := true
 BOARD_SUPPRESS_SECURE_ERASE := true
 TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery/root/system/etc/recovery.fstab
 
-# Bootdevice and hardware properties
-PRODUCT_PROPERTY_OVERRIDES += \
-    ro.hardware=exynos7904 \
-    ro.boot.hardware=exynos7904 \
-    ro.boot.bootdevice=13500000.dwmmc0 \
-    ro.bootdevice=13500000.dwmmc0
-
 # Recovery
 BOARD_HAS_DOWNLOAD_MODE := true
 AERA_HAS_DOWNLOAD_MODE := 1
