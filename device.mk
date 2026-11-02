@@ -26,6 +26,10 @@ PRODUCT_PROPERTY_OVERRIDES += \
 	ro.hardware=exynos7904 \
 	ro.boot.hardware=exynos7904 \
 	ro.boot.bootdevice=13500000.dwmmc0 \
-	ro.bootdevice=13500000.dwmmc0
+	ro.bootdevice=13500000.dwmmc0 \
+	persist.sys.usb.config=adb \
+	sys.usb.controller=13600000.dwc3 \
+	ro.debuggable=1 \
+	ro.secure=0
 
 

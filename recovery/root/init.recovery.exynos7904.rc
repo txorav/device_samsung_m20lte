@@ -11,6 +11,18 @@ on early-init
 
 on init
     setprop sys.usb.configfs 1
+    setprop sys.usb.controller "13600000.dwc3"
+
+    # Linux 4.4 binderfs fallback compatibility
+    mkdir /dev/binderfs 0755 root root
+    chmod 0755 /dev/binderfs
+    chmod 0666 /dev/binder
+    chmod 0666 /dev/hwbinder
+    chmod 0666 /dev/vndbinder
+    symlink /dev/binder /dev/binderfs/binder
+    symlink /dev/hwbinder /dev/binderfs/hwbinder
+    symlink /dev/vndbinder /dev/binderfs/vndbinder
+
     # Create bootdevice symlinks immediately during early init
     wait /dev/block/platform/13500000.dwmmc0 5
     symlink /dev/block/platform/13500000.dwmmc0 /dev/block/bootdevice
@@ -36,12 +48,18 @@ on fs
     symlink /dev/block/platform/13500000.dwmmc0/by-name /dev/block/bootdevice/by-name
 
     # Pre-create /sdcard/Fox/FoxFiles to eliminate "OrangeFox can't access its files" hint
+    mkdir /data 0771 system system
     mkdir /data/media 0775 media_rw media_rw
     mkdir /data/media/0 0775 media_rw media_rw
+    mount tmpfs tmpfs /data/media/0
     mkdir /data/media/0/Fox 0775 media_rw media_rw
     mkdir /data/media/0/Fox/FoxFiles 0775 media_rw media_rw
 
 on boot
+    setprop sys.usb.config adb
+    setprop persist.sys.usb.config adb
+    setprop service.adb.root 1
+    start adbd
     # Flashlight (S2MU004 Camera Flash)
     chmod 0666 /sys/class/camera/flash/rear_flash
     chmod 0666 /sys/devices/virtual/camera/flash/rear_flash
