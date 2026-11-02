@@ -16,17 +16,12 @@
 
 LOCAL_PATH := device/samsung/m20lte
 
-# Fastbootd
-TW_INCLUDE_FASTBOOTD := true
-
-PRODUCT_PACKAGES += \
-	android.hardware.fastboot@1.1-impl-mock \
-	fastbootd
-
-PRODUCT_PRODUCT_PROPERTIES += \
-	ro.fastbootd.available=true
+# Fastbootd (disabled for physical eMMC partitions to save ~3.5MB ramdisk)
+TW_INCLUDE_FASTBOOTD := false
 
 PRODUCT_PROPERTY_OVERRIDES += \
 	of_hide_data_hint=1 \
-	ro.orangefox.version=R12.1
+	ro.orangefox.version=R12.1 \
+	ro.product.device=m20lte
+
 

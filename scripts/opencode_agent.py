@@ -217,8 +217,22 @@ class OpencodeAgent:
             acontent = aera_mk.read_text(encoding="utf-8")
             if "AERA_ENABLE_WLAN := 1" in acontent:
                 acontent = acontent.replace("AERA_ENABLE_WLAN := 1", "AERA_ENABLE_WLAN := 0")
-                aera_mk.write_text(acontent, encoding="utf-8")
                 actions.append("Disabled AERA_ENABLE_WLAN")
+            if "AERA_ENABLE_ROOT_MANAGER := 1" in acontent:
+                acontent = acontent.replace("AERA_ENABLE_ROOT_MANAGER := 1", "AERA_ENABLE_ROOT_MANAGER := 0")
+                actions.append("Disabled AERA_ENABLE_ROOT_MANAGER")
+            aera_mk.write_text(acontent, encoding="utf-8")
+
+        device_mk = self.device_dir / "device.mk"
+        if device_mk.exists():
+            dcontent = device_mk.read_text(encoding="utf-8")
+            if "TW_INCLUDE_FASTBOOTD := true" in dcontent:
+                dcontent = dcontent.replace("TW_INCLUDE_FASTBOOTD := true", "TW_INCLUDE_FASTBOOTD := false")
+                actions.append("Disabled TW_INCLUDE_FASTBOOTD")
+            # Strip fastboot packages
+            dcontent = re.sub(r"[ \t]*android\.hardware\.fastboot@[0-9.]+-impl-mock[ \t]*\\?", "", dcontent)
+            dcontent = re.sub(r"[ \t]*fastbootd[ \t]*\\?", "", dcontent)
+            device_mk.write_text(dcontent, encoding="utf-8")
 
         if vendorsetup.exists():
             vcontent = vendorsetup.read_text(encoding="utf-8")
