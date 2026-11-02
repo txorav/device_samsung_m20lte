@@ -62,7 +62,7 @@ jobs:
           sudo docker system prune -af --volumes >/dev/null 2>&1 || true
           sudo apt-get clean
           sudo swapoff -a || true
-          sudo fallocate -l 4G /mnt/swapfile && sudo chmod 600 /mnt/swapfile
+          sudo fallocate -l 12G /mnt/swapfile && sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile && sudo swapon -p 10 /mnt/swapfile
           sudo apt-get update -qq && sudo apt-get install -y -qq btrfs-progs linux-modules-extra-$(uname -r) || true
 
@@ -162,12 +162,13 @@ jobs:
           ALLOW_MISSING_DEPENDENCIES: 'true'
           DISABLE_ARTIFACT_PATH_REQUIREMENTS: 'true'
           DISABLE_SANDBOX: 'true'
-          BUILD_JOBS: ${{ inputs.jobs || '4' }}
+          BUILD_JOBS: ${{ inputs.jobs || '2' }}
           MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_m20lte-bp2a-userdebug' }}
           BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
           TARGET_RELEASE: 'bp2a'
           LC_ALL: 'C'
           TW_DEVICE_VERSION: 'aera'
+          NINJA_STATUS: '[%p %f/%t] '
         run: |
           python3 "$GITHUB_WORKSPACE/device_repo/scripts/opencode_agent.py" supervise \
             --work-dir "$WORK" \
