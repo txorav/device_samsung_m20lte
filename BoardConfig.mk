@@ -106,7 +106,7 @@ PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
 LZMA_RAMDISK_TARGETS := recovery
 BOARD_RAMDISK_USE_XZ := true
 
-# Crypto (Galaxy M20 uses legacy FDE which is not supported in Android 12; disable to prevent Keystore2 aborts)
+# Crypto (LineageOS 22.2 on M20 uses FBE; decryption in recovery is not implemented here)
 TW_INCLUDE_CRYPTO := false
 TW_INCLUDE_CRYPTO_FBE := false
 AERA_INCLUDE_CRYPTO := false
