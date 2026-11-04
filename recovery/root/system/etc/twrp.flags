@@ -8,6 +8,8 @@
 /recovery		emmc		/dev/block/platform/13500000.dwmmc0/by-name/RECOVERY		flags=display="Recovery";backup=1;flashimg=1
 /cache			ext4		/dev/block/platform/13500000.dwmmc0/by-name/CACHE		flags=display="Cache"
 
+/data		f2fs		/dev/block/platform/13500000.dwmmc0/by-name/USERDATA		flags=display="Data";backup=1;wipeingui
+/misc		emmc		/dev/block/platform/13500000.dwmmc0/by-name/MISC		flags=display="Misc";backup=1
 /storage		f2fs		/data/media/0							flags=display="Internal Storage";usermrf;backup=1;fsflags="bind";removable
 
 /system			ext4		/dev/block/platform/13500000.dwmmc0/by-name/SYSTEM		flags=display="System";backup=1;wipeingui
